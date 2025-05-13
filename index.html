@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Integis Property Assistant</title>
     <style>
+        /* Same CSS as before */
         body {
             font-family: Arial, sans-serif;
             margin: 0;
@@ -146,8 +147,8 @@
     </div>
 
     <script>
-        // Property data - Replace with your actual properties
-        const properties = [
+        // Default properties as fallback
+        let properties = [
             {
                 name: "Airport Business Centre",
                 size: "800",
@@ -185,6 +186,22 @@
             }
         ];
 
+        // Function to receive properties from PowerApps
+        window.receiveProperties = function(propertiesJson) {
+            try {
+                // Parse the incoming JSON string into an array of property objects
+                const newProperties = JSON.parse(propertiesJson);
+                
+                // Update the properties array with the new data
+                if (Array.isArray(newProperties) && newProperties.length > 0) {
+                    properties = newProperties;
+                    console.log("Properties updated from PowerApps:", properties);
+                }
+            } catch (error) {
+                console.error("Error parsing properties from PowerApps:", error);
+            }
+        };
+
         // Hugging Face configuration
         const HUGGING_FACE_TOKEN = "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";
         const MODEL_ID = "meta-llama/Llama-2-7b-hf";
@@ -192,6 +209,19 @@
         // Add welcome message when page loads
         window.addEventListener('load', function() {
             addMessage("Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?", 'bot');
+            
+            // Signal to PowerApps that the iframe is ready
+            if (window.parent && window.parent.postMessage) {
+                window.parent.postMessage("chatbotReady", "*");
+            }
+        });
+
+        // Listen for messages from PowerApps
+        window.addEventListener('message', function(event) {
+            // Check if the message contains property data
+            if (event.data && typeof event.data === 'string' && event.data.startsWith('{')) {
+                window.receiveProperties(event.data);
+            }
         });
 
         // Send button click event
