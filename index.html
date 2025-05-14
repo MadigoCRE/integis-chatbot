@@ -98,11 +98,32 @@
         }
         
         .property-item {
-            margin: 8px 0;
+            margin: 12px 0;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: rgba(0, 120, 212, 0.05);
+            border-left: 3px solid #0078d4;
         }
         
         .property-name {
             font-weight: bold;
+            color: #0078d4;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+        
+        .property-details {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 5px;
+        }
+        
+        .property-detail {
+            background-color: #f0f0f0;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.9em;
         }
         
         .typing-indicator {
@@ -146,91 +167,35 @@
     </div>
 
     <script>
-        // Initialize empty properties array
+        // Initialize properties array
         let properties = [];
         let propertiesLoaded = false;
 
-        // Function to fetch properties from your export URL
-        async function fetchProperties() {
+        // Function to load properties from JSON file
+        async function loadProperties() {
             try {
-                console.log("Fetching properties from export URL...");
-                // Try direct URL first
-                try {
-                    const response = await fetch('https://colliersintegis.eu/czech/_export_units.php', {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json, text/plain, */*'
-                        },
-                        mode: 'cors'
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error("Direct URL failed");
-                    }
-                    
-                    await processResponse(response);
-                } catch (directError) {
-                    console.log("Direct fetch failed, trying CORS proxy...", directError);
-                    
-                    // If direct fetch fails, try with CORS proxy
-                    const proxyResponse = await fetch('https://api.allorigins.win/raw?url=' + 
-                        encodeURIComponent('https://colliersintegis.eu/czech/_export_units.php'));
-                    
-                    if (!proxyResponse.ok) {
-                        throw new Error(`HTTP error! Status: ${proxyResponse.status}`);
-                    }
-                    
-                    await processResponse(proxyResponse);
+                console.log("Loading properties from JSON file...");
+                const loadingMessage = addMessage("Loading property listings...", 'bot');
+                
+                const response = await fetch('properties.json');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
                 }
                 
+                properties = await response.json();
                 propertiesLoaded = true;
-                console.log(`Successfully loaded ${properties.length} properties`);
-            } catch (error) {
-                console.error("Error fetching properties:", error);
-                addMessage("I'm having trouble loading the property listings. Please try again later or contact Integis directly.", 'bot');
-                propertiesLoaded = false;
-            }
-        }
-        
-        // Process API response
-        async function processResponse(response) {
-            let data;
-            const contentType = response.headers.get("content-type");
-            
-            if (contentType && contentType.includes("application/json")) {
-                data = await response.json();
-            } else {
-                // If not JSON, try to parse text as JSON
-                const text = await response.text();
-                try {
-                    data = JSON.parse(text);
-                } catch (e) {
-                    console.error("Response is not valid JSON:", text.substring(0, 200) + "...");
-                    throw new Error("Invalid JSON response");
-                }
-            }
-            
-            console.log("Data received, first item:", data && data.length > 0 ? data[0] : "No data");
-            
-            // Map the data to our property format
-            if (Array.isArray(data)) {
-                properties = data.map(item => ({
-                    name: item.Title || item.building_name || item.title || "Unnamed Property",
-                    size: String(item.vacant_office_space || item.vacant_space || item.size || "0"),
-                    type: item.unittype || item.type || "space",
-                    location: (item.city || "") + (item.district ? " - " + item.district : ""),
-                    available: item.available_from || item.availability || "Contact for availability"
-                }));
                 
-                // Log a few properties to verify the format
-                if (properties.length > 0) {
-                    console.log("Sample properties:", properties.slice(0, 3));
-                } else {
-                    console.warn("No properties found in data");
+                console.log(`Successfully loaded ${properties.length} properties`);
+                loadingMessage.innerHTML = `Property listings loaded successfully! I now have information about ${properties.length} properties.`;
+                
+                return true;
+            } catch (error) {
+                console.error("Error loading properties:", error);
+                const loadingMessage = document.querySelector('.bot-message:last-child');
+                if (loadingMessage) {
+                    loadingMessage.innerHTML = "I'm having trouble loading the property listings. Please try again later.";
                 }
-            } else {
-                console.error("Data is not an array:", data);
-                throw new Error("Invalid data format - expected an array");
+                return false;
             }
         }
 
@@ -238,27 +203,13 @@
         const HUGGING_FACE_TOKEN = "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";
         const MODEL_ID = "meta-llama/Llama-2-7b-hf";
 
-        // Add welcome message and fetch properties when page loads
+        // Add welcome message and load properties when page loads
         window.addEventListener('load', async function() {
             // Add welcome message
             addMessage("Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?", 'bot');
             
-            // Add loading message
-            const loadingMessage = addMessage("Loading property listings...", 'bot');
-            
-            // Fetch properties
-            try {
-                await fetchProperties();
-                // Update or remove loading message
-                if (propertiesLoaded) {
-                    loadingMessage.innerHTML = `Property listings loaded successfully! I now have information about ${properties.length} properties.`;
-                } else {
-                    loadingMessage.innerHTML = "I'm having trouble accessing the property listings right now. I'll still try to help with what I know.";
-                }
-            } catch (error) {
-                console.error("Failed to load properties:", error);
-                loadingMessage.innerHTML = "I'm having trouble accessing the property listings right now. I'll still try to help with what I know.";
-            }
+            // Load properties
+            await loadProperties();
         });
 
         // Send button click event
@@ -291,14 +242,9 @@
             document.getElementById('messages').appendChild(typingIndicator);
             document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
             
-            // Check if properties are loaded
-            if (!propertiesLoaded || properties.length === 0) {
-                // Try to fetch properties again if they're not loaded
-                try {
-                    await fetchProperties();
-                } catch (error) {
-                    console.error("Error re-fetching properties:", error);
-                }
+            // Ensure properties are loaded
+            if (!propertiesLoaded) {
+                await loadProperties();
             }
             
             // Get response (using Hugging Face API or fallback)
@@ -354,15 +300,34 @@
             
             // Format properties as text for the prompt
             let propertiesText = "";
-            // Limit to 20 properties to avoid token limits
-            const propsToInclude = properties.slice(0, 20);
-            propsToInclude.forEach(property => {
-                propertiesText += `- ${property.name}: ${property.size} sqm ${property.type} in ${property.location}, available: ${property.available}\n`;
+            properties.forEach(property => {
+                let detailsText = `- ${property.name}: ${property.size} sqm ${property.type || ""}`;
+                
+                if (property.price) {
+                    detailsText += `, ${property.price}`;
+                }
+                
+                if (property.floor) {
+                    detailsText += `, ${property.floor}`;
+                }
+                
+                // Use location if available, otherwise fallback to city and district
+                if (property.location) {
+                    detailsText += ` in ${property.location}`;
+                } else if (property.city) {
+                    detailsText += ` in ${property.city}`;
+                    if (property.district) {
+                        detailsText += ` - ${property.district}`;
+                    }
+                }
+                
+                if (property.available) {
+                    detailsText += `, available: ${property.available}`;
+                }
+                
+                detailsText += "\n";
+                propertiesText += detailsText;
             });
-            
-            if (properties.length > 20) {
-                propertiesText += `- Plus ${properties.length - 20} more properties available.\n`;
-            }
 
             // Llama 2 specific prompt formatting
             const prompt = `<s>[INST] <<SYS>>
@@ -436,27 +401,73 @@ ${userInput} [/INST]`;
             }
             
             // Check for property type queries
-            const isOffice = /office|workspace/i.test(userInput);
-            const isRetail = /retail|shop|store/i.test(userInput);
+            const isOffice = /office|workspace|kanceláře/i.test(userInput);
+            const isRetail = /retail|shop|store|obchody/i.test(userInput);
             
             // Check for locations
-            const locationMatches = userInput.match(/prague\s*(\d+|center|downtown)?/i);
+            const pragueMatch = /prague|praha/i.test(userInput);
+            const brnoMatch = /brno/i.test(userInput);
+            const ostravaMatch = /ostrava/i.test(userInput);
+            
+            // Check for district
+            let districtMatch = null;
+            if (pragueMatch) {
+                const pragueDistrictRegex = /prague\s*(\d+)|praha\s*(\d+)/i;
+                const match = userInput.match(pragueDistrictRegex);
+                if (match && (match[1] || match[2])) {
+                    districtMatch = match[1] || match[2];
+                }
+            }
             
             // Check for size
             const sizeMatches = userInput.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2)/i);
+            
+            // Check for price
+            const priceMatches = userInput.match(/(\d+)\s*(?:€|eur|euro|euros|czk|kč)/i);
             
             // Filter properties
             let matchedProperties = [...properties];
             
             if (isOffice) {
-                matchedProperties = matchedProperties.filter(p => p.type.toLowerCase().includes('office'));
+                matchedProperties = matchedProperties.filter(p => 
+                    p.type && (
+                        p.type.toLowerCase().includes('office') || 
+                        p.type.toLowerCase().includes('kanceláře')
+                    )
+                );
             } else if (isRetail) {
-                matchedProperties = matchedProperties.filter(p => p.type.toLowerCase().includes('retail'));
+                matchedProperties = matchedProperties.filter(p => 
+                    p.type && (
+                        p.type.toLowerCase().includes('retail') || 
+                        p.type.toLowerCase().includes('obchody')
+                    )
+                );
             }
             
-            if (locationMatches) {
-                const location = locationMatches[0].toLowerCase();
-                matchedProperties = matchedProperties.filter(p => p.location.toLowerCase().includes(location));
+            if (pragueMatch) {
+                matchedProperties = matchedProperties.filter(p => 
+                    (p.city && p.city.toLowerCase().includes('prague')) || 
+                    (p.city && p.city.toLowerCase().includes('praha')) ||
+                    (p.location && p.location.toLowerCase().includes('prague')) ||
+                    (p.location && p.location.toLowerCase().includes('praha'))
+                );
+                
+                if (districtMatch) {
+                    matchedProperties = matchedProperties.filter(p => 
+                        (p.district && p.district.includes(districtMatch)) ||
+                        (p.location && p.location.includes(districtMatch))
+                    );
+                }
+            } else if (brnoMatch) {
+                matchedProperties = matchedProperties.filter(p => 
+                    (p.city && p.city.toLowerCase().includes('brno')) ||
+                    (p.location && p.location.toLowerCase().includes('brno'))
+                );
+            } else if (ostravaMatch) {
+                matchedProperties = matchedProperties.filter(p => 
+                    (p.city && p.city.toLowerCase().includes('ostrava')) ||
+                    (p.location && p.location.toLowerCase().includes('ostrava'))
+                );
             }
             
             if (sizeMatches) {
@@ -470,6 +481,29 @@ ${userInput} [/INST]`;
                 });
             }
             
+            if (priceMatches) {
+                const requestedPrice = parseInt(priceMatches[1]);
+                matchedProperties = matchedProperties.filter(p => {
+                    if (!p.price) return false;
+                    
+                    if (p.price.includes('€')) {
+                        const priceMatch = p.price.match(/€(\d+)/);
+                        if (priceMatch) {
+                            const price = parseInt(priceMatch[1]);
+                            return Math.abs(price - requestedPrice) <= requestedPrice * 0.3;
+                        }
+                    } else if (p.price.includes('CZK')) {
+                        const priceMatch = p.price.match(/(\d+)\s*CZK/);
+                        if (priceMatch) {
+                            const price = parseInt(priceMatch[1]);
+                            return Math.abs(price - requestedPrice) <= requestedPrice * 0.3;
+                        }
+                    }
+                    
+                    return false;
+                });
+            }
+            
             // Generate response with properties
             if (matchedProperties.length > 0) {
                 let response = `Based on your query, I found these properties that might interest you:<br><br>`;
@@ -478,9 +512,45 @@ ${userInput} [/INST]`;
                 const propertiesToShow = matchedProperties.slice(0, 3);
                 
                 propertiesToShow.forEach(property => {
-                    response += `<div class="property-item">
-                        <span class="property-name">${property.name}</span> - ${property.size} sqm ${property.type} in ${property.location}, available: ${property.available}
-                    </div>`;
+                    let propertyDetails = `<div class="property-item">
+                        <div class="property-name">${property.name}</div>`;
+                    
+                    propertyDetails += `<div class="property-details">`;
+                    
+                    if (property.size) {
+                        propertyDetails += `<span class="property-detail">${property.size} sqm</span>`;
+                    }
+                    
+                    if (property.type) {
+                        propertyDetails += `<span class="property-detail">${property.type}</span>`;
+                    }
+                    
+                    if (property.price) {
+                        propertyDetails += `<span class="property-detail">${property.price}</span>`;
+                    }
+                    
+                    if (property.floor) {
+                        propertyDetails += `<span class="property-detail">${property.floor}</span>`;
+                    }
+                    
+                    // Use location if available, otherwise fallback to city and district
+                    if (property.location) {
+                        propertyDetails += `<span class="property-detail">${property.location}</span>`;
+                    } else if (property.city) {
+                        let locationText = property.city;
+                        if (property.district) {
+                            locationText += ` - ${property.district}`;
+                        }
+                        propertyDetails += `<span class="property-detail">${locationText}</span>`;
+                    }
+                    
+                    if (property.available) {
+                        propertyDetails += `<span class="property-detail">Available: ${property.available}</span>`;
+                    }
+                    
+                    propertyDetails += `</div></div>`;
+                    
+                    response += propertyDetails;
                 });
                 
                 if (matchedProperties.length > 3) {
