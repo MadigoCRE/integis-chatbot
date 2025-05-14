@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Property Data Converter</title>
+    <title>Integis Property Data Converter</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -22,6 +22,7 @@
             color: white;
             border: none;
             cursor: pointer;
+            margin-right: 10px;
         }
         #output {
             margin-top: 20px;
@@ -35,10 +36,16 @@
             background-color: #f8f8f8;
             border-left: 4px solid #0078d4;
         }
+        .field-mapping {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f0f8ff;
+            border-left: 4px solid #4682b4;
+        }
     </style>
 </head>
 <body>
-    <h1>Property Data Converter</h1>
+    <h1>Integis Property Data Converter</h1>
     
     <div class="instructions">
         <h3>Instructions:</h3>
@@ -50,6 +57,22 @@
             <li>Create a file called "properties.json" in your repository with this content</li>
         </ol>
     </div>
+
+    <div class="field-mapping">
+        <h3>Field Mapping:</h3>
+        <p>The converter will focus on these important fields:</p>
+        <ul>
+            <li><strong>name</strong>: property_name (Building name)</li>
+            <li><strong>size</strong>: vacant_office_area (Size of the unit)</li>
+            <li><strong>priceMin</strong>: rent_office_min (Minimum price in EUR or CZK)</li>
+            <li><strong>priceMax</strong>: rent_office_max (Maximum price in EUR or CZK)</li>
+            <li><strong>type</strong>: unittype (Type of unit)</li>
+            <li><strong>floor</strong>: unit_name (Floor of the unit)</li>
+            <li><strong>city</strong>: city (City location)</li>
+            <li><strong>district</strong>: district (District within city)</li>
+            <li><strong>available</strong>: available_from (Availability)</li>
+        </ul>
+    </div>
     
     <h2>Input Data</h2>
     <p>Paste your data here (CSV, JSON, or any format):</p>
@@ -57,6 +80,7 @@
     
     <div>
         <button id="convert">Convert Data</button>
+        <button id="sampleData">Load Sample Data</button>
     </div>
     
     <h2>Output (JSON)</h2>
@@ -64,9 +88,21 @@
     
     <div>
         <button id="copy">Copy to Clipboard</button>
+        <button id="download">Download as properties.json</button>
     </div>
 
     <script>
+        // Sample data for testing
+        const sampleData = `property_name,vacant_office_area,rent_office_min,rent_office_max,unittype,available_from,unit_name,city,district
+Jindrich Center Ostrava,2221,8.5,10,office / kanceláře,Q4 2022,Floor 3,Ostrava,
+Palác Dunaj,354,15,16.5,office-sublease / kanceláře-podnájem,Now / Ihned,Floor 6,Prague,
+Avenir Business Park,949,16,18,office / kanceláře,Now / Ihned,Floor 1,Prague,5
+South Point,460,14.5,15.5,office / kanceláře,Now / Ihned,Floor 11,Prague,4`;
+
+        document.getElementById('sampleData').addEventListener('click', function() {
+            document.getElementById('input').value = sampleData;
+        });
+
         document.getElementById('convert').addEventListener('click', function() {
             const input = document.getElementById('input').value;
             let properties = [];
@@ -104,15 +140,49 @@
             alert('Copied to clipboard!');
         });
         
-        // Process JSON array data
+        document.getElementById('download').addEventListener('click', function() {
+            const output = document.getElementById('output').value;
+            const blob = new Blob([output], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'properties.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+        
+        // Process JSON array data with focus on important fields
         function processJsonArray(data) {
             return data.map(item => {
+                // Determine currency and format prices
+                const priceMin = extractValue(item, ['rent_office_min', 'rent_min', 'price_min', 'min_price']);
+                const priceMax = extractValue(item, ['rent_office_max', 'rent_max', 'price_max', 'max_price']);
+                
+                // Format the price range
+                let formattedPrice = formatPrice(priceMin, priceMax);
+                
+                // Get city and district
+                const city = extractValue(item, ['city', 'town', 'municipality']);
+                const district = extractValue(item, ['district', 'area', 'zone']);
+                
+                // Construct location
+                let location = city || '';
+                if (district) {
+                    location += location ? ` - ${district}` : district;
+                }
+                
                 return {
-                    name: extractValue(item, ['Title', 'title', 'name', 'building_name', 'property_name']),
-                    size: String(extractValue(item, ['vacant_office_space', 'vacant_space', 'size', 'area', 'square_meters'], '0')),
+                    name: extractValue(item, ['property_name', 'building_name', 'Title', 'title', 'name']),
+                    size: String(extractValue(item, ['vacant_office_area', 'vacant_office_space', 'vacant_space', 'size', 'area'], '0')),
+                    price: formattedPrice,
                     type: extractValue(item, ['unittype', 'type', 'property_type', 'category']),
-                    location: extractValue(item, ['city', 'location', 'address']) + 
-                             (extractValue(item, ['district']) ? ' - ' + extractValue(item, ['district']) : ''),
+                    floor: extractValue(item, ['unit_name', 'floor', 'level']),
+                    city: city,
+                    district: district,
+                    location: location,
                     available: extractValue(item, ['available_from', 'availability', 'date_available'])
                 };
             });
@@ -129,12 +199,31 @@
             }
             
             // Try to extract property values directly from object
+            const priceMin = extractValue(data, ['rent_office_min', 'rent_min', 'price_min', 'min_price']);
+            const priceMax = extractValue(data, ['rent_office_max', 'rent_max', 'price_max', 'max_price']);
+            
+            // Format the price range
+            let formattedPrice = formatPrice(priceMin, priceMax);
+            
+            // Get city and district
+            const city = extractValue(data, ['city', 'town', 'municipality']);
+            const district = extractValue(data, ['district', 'area', 'zone']);
+            
+            // Construct location
+            let location = city || '';
+            if (district) {
+                location += location ? ` - ${district}` : district;
+            }
+            
             return [{
-                name: extractValue(data, ['Title', 'title', 'name', 'building_name', 'property_name']),
-                size: String(extractValue(data, ['vacant_office_space', 'vacant_space', 'size', 'area', 'square_meters'], '0')),
+                name: extractValue(data, ['property_name', 'building_name', 'Title', 'title', 'name']),
+                size: String(extractValue(data, ['vacant_office_area', 'vacant_office_space', 'vacant_space', 'size', 'area'], '0')),
+                price: formattedPrice,
                 type: extractValue(data, ['unittype', 'type', 'property_type', 'category']),
-                location: extractValue(data, ['city', 'location', 'address']) + 
-                         (extractValue(data, ['district']) ? ' - ' + extractValue(data, ['district']) : ''),
+                floor: extractValue(data, ['unit_name', 'floor', 'level']),
+                city: city,
+                district: district,
+                location: location,
                 available: extractValue(data, ['available_from', 'availability', 'date_available'])
             }];
         }
@@ -154,18 +243,40 @@
             const properties = [];
             for (let i = 1; i < lines.length; i++) {
                 const values = lines[i].split(separator);
-                if (values.length === headers.length) {
+                if (values.length >= headers.length) {
                     const item = {};
                     headers.forEach((header, index) => {
-                        item[header] = values[index].trim();
+                        if (index < values.length) {
+                            item[header] = values[index].trim();
+                        }
                     });
                     
+                    // Determine currency and format prices
+                    const priceMin = extractValue(item, ['rent_office_min', 'rent_min', 'price_min', 'min_price']);
+                    const priceMax = extractValue(item, ['rent_office_max', 'rent_max', 'price_max', 'max_price']);
+                    
+                    // Format the price range
+                    let formattedPrice = formatPrice(priceMin, priceMax);
+                    
+                    // Get city and district
+                    const city = extractValue(item, ['city', 'town', 'municipality']);
+                    const district = extractValue(item, ['district', 'area', 'zone']);
+                    
+                    // Construct location
+                    let location = city || '';
+                    if (district) {
+                        location += location ? ` - ${district}` : district;
+                    }
+                    
                     properties.push({
-                        name: extractValue(item, ['title', 'name', 'building', 'building_name', 'property_name', 'property']),
-                        size: String(extractValue(item, ['vacant_office_space', 'vacant space', 'size', 'area', 'square_meters', 'sqm'], '0')),
+                        name: extractValue(item, ['property_name', 'building_name', 'title', 'name', 'building', 'property']),
+                        size: String(extractValue(item, ['vacant_office_area', 'vacant_office_space', 'vacant space', 'size', 'area', 'square_meters', 'sqm'], '0')),
+                        price: formattedPrice,
                         type: extractValue(item, ['unittype', 'unit type', 'type', 'property_type', 'property type', 'category']),
-                        location: extractValue(item, ['city', 'location', 'address']) + 
-                                 (extractValue(item, ['district']) ? ' - ' + extractValue(item, ['district']) : ''),
+                        floor: extractValue(item, ['unit_name', 'floor', 'level']),
+                        city: city,
+                        district: district,
+                        location: location,
                         available: extractValue(item, ['available_from', 'available from', 'availability', 'date_available', 'date available'])
                     });
                 }
@@ -176,66 +287,9 @@
         
         // Try to process unknown format
         function processUnknownFormat(data) {
-            // Split into lines
-            const lines = data.trim().split(/\r?\n/);
-            
-            // Try to extract properties using regex patterns
-            const properties = [];
-            let currentProperty = {};
-            
-            for (let line of lines) {
-                line = line.trim();
-                
-                // Skip empty lines
-                if (!line) continue;
-                
-                // Check if this is a new property entry
-                if (line.match(/^[A-Z][\w\s]+:/) || line.match(/^[A-Z][\w\s]+$/)) {
-                    // Save previous property if it exists
-                    if (currentProperty.name) {
-                        properties.push({...currentProperty});
-                    }
-                    
-                    // Start a new property
-                    currentProperty = {
-                        name: line.replace(/:$/, ''),
-                        size: '0',
-                        type: '',
-                        location: '',
-                        available: ''
-                    };
-                } else {
-                    // Try to extract property details
-                    if (line.match(/size|area|square|sqm/i)) {
-                        const sizeMatch = line.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2)/i);
-                        if (sizeMatch) {
-                            currentProperty.size = sizeMatch[1];
-                        }
-                    } else if (line.match(/type|category|property type/i)) {
-                        const typeMatch = line.match(/type:?\s*([^,]+)/i) || line.match(/category:?\s*([^,]+)/i) || line.match(/property type:?\s*([^,]+)/i);
-                        if (typeMatch) {
-                            currentProperty.type = typeMatch[1].trim();
-                        }
-                    } else if (line.match(/location|address|city/i)) {
-                        const locationMatch = line.match(/location:?\s*([^,]+)/i) || line.match(/address:?\s*([^,]+)/i) || line.match(/city:?\s*([^,]+)/i);
-                        if (locationMatch) {
-                            currentProperty.location = locationMatch[1].trim();
-                        }
-                    } else if (line.match(/available|availability|date/i)) {
-                        const availableMatch = line.match(/available:?\s*([^,]+)/i) || line.match(/availability:?\s*([^,]+)/i) || line.match(/date:?\s*([^,]+)/i);
-                        if (availableMatch) {
-                            currentProperty.available = availableMatch[1].trim();
-                        }
-                    }
-                }
-            }
-            
-            // Add the last property
-            if (currentProperty.name) {
-                properties.push({...currentProperty});
-            }
-            
-            return properties;
+            // This is a fallback for difficult-to-parse formats
+            alert("The data format couldn't be automatically detected. Try formatting your data as CSV with headers.");
+            return [];
         }
         
         // Helper function to extract a value from an object
@@ -244,8 +298,56 @@
                 if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
                     return obj[key];
                 }
+                
+                // Try case-insensitive match
+                const lowerKey = key.toLowerCase();
+                for (const objKey in obj) {
+                    if (objKey.toLowerCase() === lowerKey && obj[objKey] !== undefined && obj[objKey] !== null && obj[objKey] !== '') {
+                        return obj[objKey];
+                    }
+                }
             }
             return defaultValue;
+        }
+        
+        // Helper function to format price
+        function formatPrice(minPrice, maxPrice) {
+            const minValue = parseFloat(minPrice);
+            const maxValue = parseFloat(maxPrice);
+            
+            let formattedPrice = '';
+            
+            // Check if we have valid min and max values
+            if (!isNaN(minValue)) {
+                if (minValue < 100) {
+                    formattedPrice = `€${minValue}`;
+                    
+                    // Add max price if available and different from min
+                    if (!isNaN(maxValue) && maxValue > minValue) {
+                        formattedPrice += `-${maxValue}`;
+                    }
+                    
+                    formattedPrice += '/sqm/month';
+                } else {
+                    formattedPrice = `${minValue}`;
+                    
+                    // Add max price if available and different from min
+                    if (!isNaN(maxValue) && maxValue > minValue) {
+                        formattedPrice += `-${maxValue}`;
+                    }
+                    
+                    formattedPrice += ' CZK/sqm/month';
+                }
+            } else if (!isNaN(maxValue)) {
+                // Only max price is available
+                if (maxValue < 100) {
+                    formattedPrice = `Up to €${maxValue}/sqm/month`;
+                } else {
+                    formattedPrice = `Up to ${maxValue} CZK/sqm/month`;
+                }
+            }
+            
+            return formattedPrice;
         }
     </script>
 </body>
