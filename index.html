@@ -154,11 +154,31 @@
             clear: both;
             display: table;
         }
+        
+        /* Reset button */
+        #reset-chat {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: transparent;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+            opacity: 0.8;
+        }
+        
+        #reset-chat:hover {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
     <div class="chat-container">
-        <div class="chat-header">Integis Property Assistant</div>
+        <div class="chat-header">
+            Integis Property Assistant
+            <button id="reset-chat">New Chat</button>
+        </div>
         <div id="messages" class="messages-container"></div>
         <div class="input-container">
             <input type="text" id="user-input" placeholder="Ask about our properties...">
@@ -170,6 +190,10 @@
         // Initialize properties array
         let properties = [];
         let propertiesLoaded = false;
+        
+        // Conversation history
+        let conversationHistory = [];
+        const MAX_CONVERSATION_LENGTH = 6; // Maximum number of exchanges to remember
 
         // Function to load properties from JSON file
         async function loadProperties() {
@@ -206,10 +230,30 @@
         // Add welcome message and load properties when page loads
         window.addEventListener('load', async function() {
             // Add welcome message
-            addMessage("Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?", 'bot');
+            const welcomeMessage = "Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?";
+            addMessage(welcomeMessage, 'bot');
+            
+            // Add to conversation history
+            conversationHistory.push({role: "assistant", content: welcomeMessage});
             
             // Load properties
             await loadProperties();
+        });
+
+        // Reset chat button
+        document.getElementById('reset-chat').addEventListener('click', function() {
+            // Clear conversation history
+            conversationHistory = [];
+            
+            // Clear messages
+            document.getElementById('messages').innerHTML = '';
+            
+            // Add welcome message
+            const welcomeMessage = "Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?";
+            addMessage(welcomeMessage, 'bot');
+            
+            // Add to conversation history
+            conversationHistory.push({role: "assistant", content: welcomeMessage});
         });
 
         // Send button click event
@@ -229,6 +273,18 @@
             
             // Add user message
             addMessage(userInput.value, 'user');
+            
+            // Add to conversation history
+            conversationHistory.push({role: "user", content: userInput.value});
+            
+            // Limit conversation history length (remove oldest exchanges but keep the welcome message)
+            if (conversationHistory.length > MAX_CONVERSATION_LENGTH * 2 + 1) {
+                // Keep the first message and the last MAX_CONVERSATION_LENGTH*2 messages
+                conversationHistory = [
+                    conversationHistory[0],
+                    ...conversationHistory.slice(-(MAX_CONVERSATION_LENGTH * 2))
+                ];
+            }
             
             // Clear input and store message
             const userMessage = userInput.value;
@@ -255,6 +311,9 @@
                     document.getElementById('typing-indicator').remove();
                 }
                 addMessage(aiResponse, 'bot');
+                
+                // Add to conversation history
+                conversationHistory.push({role: "assistant", content: aiResponse});
             } catch (error) {
                 // Fallback to local response if API fails
                 console.error("Error calling AI:", error);
@@ -263,6 +322,9 @@
                 }
                 const fallbackResponse = generateLocalResponse(userMessage);
                 addMessage(fallbackResponse, 'bot');
+                
+                // Add to conversation history
+                conversationHistory.push({role: "assistant", content: fallbackResponse});
             }
         }
 
@@ -289,6 +351,23 @@
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
             
             return messageDiv;
+        }
+
+        // Function to format conversation history for the prompt
+        function formatConversationHistory() {
+            // Get the last few exchanges (limited by MAX_CONVERSATION_LENGTH)
+            const recentConversation = conversationHistory.slice(-MAX_CONVERSATION_LENGTH * 2);
+            
+            let formattedHistory = "";
+            recentConversation.forEach((exchange) => {
+                if (exchange.role === "user") {
+                    formattedHistory += `Human: ${exchange.content}\n`;
+                } else {
+                    formattedHistory += `Assistant: ${exchange.content}\n`;
+                }
+            });
+            
+            return formattedHistory;
         }
 
         // Function to call Hugging Face API
@@ -329,12 +408,18 @@
                 propertiesText += detailsText;
             });
 
+            // Get formatted conversation history
+            const conversationHistoryText = formatConversationHistory();
+
             // Llama 2 specific prompt formatting
             const prompt = `<s>[INST] <<SYS>>
 You are a professional commercial real estate assistant for Integis. Your job is to help clients find the perfect office, retail, or industrial space based on their needs. Be concise, professional, and helpful.
 
 AVAILABLE PROPERTIES:
 ${propertiesText}
+
+CONVERSATION HISTORY:
+${conversationHistoryText}
 <</SYS>>
 
 ${userInput} [/INST]`;
@@ -393,6 +478,24 @@ ${userInput} [/INST]`;
             // Check if properties are loaded
             if (!propertiesLoaded || properties.length === 0) {
                 return "I don't have access to our property listings at the moment. Please try again later or contact Integis directly for assistance.";
+            }
+            
+            // Check for follow-up questions about properties
+            if (conversationHistory.length >= 3) {
+                const lastBotMessage = conversationHistory.filter(msg => msg.role === "assistant").pop().content;
+                const lastUserMessage = userInput;
+                
+                // Check if last bot message mentioned properties and user is asking for more details
+                if (lastBotMessage.includes("matching properties") && 
+                    (lastUserMessage.includes("more detail") || 
+                     lastUserMessage.includes("tell me more") || 
+                     lastUserMessage.includes("yes") || 
+                     lastUserMessage.includes("show me") ||
+                     lastUserMessage.includes("please"))) {
+                    
+                    return "Great! Here are more details about the properties I mentioned:<br><br>" + 
+                           "For detailed information about specific properties, please contact our sales team at info@integis.cz or visit our website.";
+                }
             }
             
             // Check for greetings
