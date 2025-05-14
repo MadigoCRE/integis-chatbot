@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Property Data Converter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            line-height: 1.6;
+        }
+        textarea {
+            width: 100%;
+            height: 300px;
+            margin: 10px 0;
+            font-family: monospace;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #0078d4;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+        }
+        .instructions {
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f8f8;
+            border-left: 4px solid #0078d4;
+        }
+    </style>
+</head>
+<body>
+    <h1>Property Data Converter</h1>
+    
+    <div class="instructions">
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Copy your property data from the export page or database</li>
+            <li>Paste it into the input box below</li>
+            <li>Click "Convert Data"</li>
+            <li>Copy the formatted JSON from the output box</li>
+            <li>Create a file called "properties.json" in your repository with this content</li>
+        </ol>
+    </div>
+    
+    <h2>Input Data</h2>
+    <p>Paste your data here (CSV, JSON, or any format):</p>
+    <textarea id="input" placeholder="Paste your property data here..."></textarea>
+    
+    <div>
+        <button id="convert">Convert Data</button>
+    </div>
+    
+    <h2>Output (JSON)</h2>
+    <textarea id="output" readonly></textarea>
+    
+    <div>
+        <button id="copy">Copy to Clipboard</button>
+    </div>
+
+    <script>
+        document.getElementById('convert').addEventListener('click', function() {
+            const input = document.getElementById('input').value;
+            let properties = [];
+            
+            try {
+                // Try parsing as JSON first
+                try {
+                    const jsonData = JSON.parse(input);
+                    if (Array.isArray(jsonData)) {
+                        properties = processJsonArray(jsonData);
+                    } else {
+                        properties = processJsonObject(jsonData);
+                    }
+                } catch (e) {
+                    // If not valid JSON, try parsing as CSV or other formats
+                    if (input.includes('\t') || input.includes(',')) {
+                        properties = processCsvOrTabular(input);
+                    } else {
+                        // Try to parse as unknown format
+                        properties = processUnknownFormat(input);
+                    }
+                }
+                
+                // Output the result
+                document.getElementById('output').value = JSON.stringify(properties, null, 2);
+            } catch (error) {
+                document.getElementById('output').value = "Error processing data: " + error.message;
+            }
+        });
+        
+        document.getElementById('copy').addEventListener('click', function() {
+            const output = document.getElementById('output');
+            output.select();
+            document.execCommand('copy');
+            alert('Copied to clipboard!');
+        });
+        
+        // Process JSON array data
+        function processJsonArray(data) {
+            return data.map(item => {
+                return {
+                    name: extractValue(item, ['Title', 'title', 'name', 'building_name', 'property_name']),
+                    size: String(extractValue(item, ['vacant_office_space', 'vacant_space', 'size', 'area', 'square_meters'], '0')),
+                    type: extractValue(item, ['unittype', 'type', 'property_type', 'category']),
+                    location: extractValue(item, ['city', 'location', 'address']) + 
+                             (extractValue(item, ['district']) ? ' - ' + extractValue(item, ['district']) : ''),
+                    available: extractValue(item, ['available_from', 'availability', 'date_available'])
+                };
+            });
+        }
+        
+        // Process JSON object data
+        function processJsonObject(data) {
+            // Convert object to array if possible
+            if (data.properties || data.items || data.data) {
+                const array = data.properties || data.items || data.data;
+                if (Array.isArray(array)) {
+                    return processJsonArray(array);
+                }
+            }
+            
+            // Try to extract property values directly from object
+            return [{
+                name: extractValue(data, ['Title', 'title', 'name', 'building_name', 'property_name']),
+                size: String(extractValue(data, ['vacant_office_space', 'vacant_space', 'size', 'area', 'square_meters'], '0')),
+                type: extractValue(data, ['unittype', 'type', 'property_type', 'category']),
+                location: extractValue(data, ['city', 'location', 'address']) + 
+                         (extractValue(data, ['district']) ? ' - ' + extractValue(data, ['district']) : ''),
+                available: extractValue(data, ['available_from', 'availability', 'date_available'])
+            }];
+        }
+        
+        // Process CSV or tabular data
+        function processCsvOrTabular(data) {
+            // Split into lines
+            const lines = data.trim().split(/\r?\n/);
+            
+            // Determine separator (comma or tab)
+            const separator = lines[0].includes('\t') ? '\t' : ',';
+            
+            // Extract headers
+            const headers = lines[0].split(separator).map(h => h.trim().toLowerCase());
+            
+            // Process rows
+            const properties = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(separator);
+                if (values.length === headers.length) {
+                    const item = {};
+                    headers.forEach((header, index) => {
+                        item[header] = values[index].trim();
+                    });
+                    
+                    properties.push({
+                        name: extractValue(item, ['title', 'name', 'building', 'building_name', 'property_name', 'property']),
+                        size: String(extractValue(item, ['vacant_office_space', 'vacant space', 'size', 'area', 'square_meters', 'sqm'], '0')),
+                        type: extractValue(item, ['unittype', 'unit type', 'type', 'property_type', 'property type', 'category']),
+                        location: extractValue(item, ['city', 'location', 'address']) + 
+                                 (extractValue(item, ['district']) ? ' - ' + extractValue(item, ['district']) : ''),
+                        available: extractValue(item, ['available_from', 'available from', 'availability', 'date_available', 'date available'])
+                    });
+                }
+            }
+            
+            return properties;
+        }
+        
+        // Try to process unknown format
+        function processUnknownFormat(data) {
+            // Split into lines
+            const lines = data.trim().split(/\r?\n/);
+            
+            // Try to extract properties using regex patterns
+            const properties = [];
+            let currentProperty = {};
+            
+            for (let line of lines) {
+                line = line.trim();
+                
+                // Skip empty lines
+                if (!line) continue;
+                
+                // Check if this is a new property entry
+                if (line.match(/^[A-Z][\w\s]+:/) || line.match(/^[A-Z][\w\s]+$/)) {
+                    // Save previous property if it exists
+                    if (currentProperty.name) {
+                        properties.push({...currentProperty});
+                    }
+                    
+                    // Start a new property
+                    currentProperty = {
+                        name: line.replace(/:$/, ''),
+                        size: '0',
+                        type: '',
+                        location: '',
+                        available: ''
+                    };
+                } else {
+                    // Try to extract property details
+                    if (line.match(/size|area|square|sqm/i)) {
+                        const sizeMatch = line.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2)/i);
+                        if (sizeMatch) {
+                            currentProperty.size = sizeMatch[1];
+                        }
+                    } else if (line.match(/type|category|property type/i)) {
+                        const typeMatch = line.match(/type:?\s*([^,]+)/i) || line.match(/category:?\s*([^,]+)/i) || line.match(/property type:?\s*([^,]+)/i);
+                        if (typeMatch) {
+                            currentProperty.type = typeMatch[1].trim();
+                        }
+                    } else if (line.match(/location|address|city/i)) {
+                        const locationMatch = line.match(/location:?\s*([^,]+)/i) || line.match(/address:?\s*([^,]+)/i) || line.match(/city:?\s*([^,]+)/i);
+                        if (locationMatch) {
+                            currentProperty.location = locationMatch[1].trim();
+                        }
+                    } else if (line.match(/available|availability|date/i)) {
+                        const availableMatch = line.match(/available:?\s*([^,]+)/i) || line.match(/availability:?\s*([^,]+)/i) || line.match(/date:?\s*([^,]+)/i);
+                        if (availableMatch) {
+                            currentProperty.available = availableMatch[1].trim();
+                        }
+                    }
+                }
+            }
+            
+            // Add the last property
+            if (currentProperty.name) {
+                properties.push({...currentProperty});
+            }
+            
+            return properties;
+        }
+        
+        // Helper function to extract a value from an object
+        function extractValue(obj, possibleKeys, defaultValue = '') {
+            for (const key of possibleKeys) {
+                if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') {
+                    return obj[key];
+                }
+            }
+            return defaultValue;
+        }
+    </script>
+</body>
+</html>
