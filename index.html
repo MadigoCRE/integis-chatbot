@@ -217,9 +217,18 @@
         // Conversation history - store the entire conversation
         let conversationHistory = [];
 
+        // Conversation state - NEW ADDITION to track state across interactions
+        let conversationState = {
+            currentSearchCriteria: null,
+            lastShownProperties: [],
+            offset: 0, // For pagination of results
+            lastQuery: "",
+            lastResponse: ""
+        };
+
         // Hugging Face configuration - Updated with correct model ID
         const HUGGING_FACE_TOKEN = "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";
-        const MODEL_ID = "meta-llama/Llama-2-7b-chat-hf"; // Updated model ID
+        const MODEL_ID = "meta-llama/Llama-2-7b-chat-hf"; // Model ID
 
         // Debug logger function
         function debugLog(message, obj = null) {
@@ -299,10 +308,19 @@
             }
         });
 
-        // Reset chat button
+        // Reset chat button - UPDATED to clear conversation state
         document.getElementById('reset-chat').addEventListener('click', function() {
             // Clear conversation history
             conversationHistory = [];
+            
+            // Reset conversation state
+            conversationState = {
+                currentSearchCriteria: null,
+                lastShownProperties: [],
+                offset: 0,
+                lastQuery: "",
+                lastResponse: ""
+            };
             
             // Clear messages
             document.getElementById('messages').innerHTML = '';
@@ -314,7 +332,7 @@
             // Add to conversation history
             conversationHistory.push({role: "assistant", content: welcomeMessage});
             
-            debugLog("Chat reset");
+            debugLog("Chat reset, conversation state cleared");
         });
 
         // Send button click event
@@ -327,7 +345,486 @@
             }
         });
 
-        // Updated API call function with correct Llama 2 Chat format
+        // NEW FUNCTION: Improved follow-up detection
+        function isFollowUpQuestion(userInput) {
+            // First, check for obvious follow-up phrases
+            const followUpPhrases = /more|additional|another|further|similar|like that|such|tell me more|show more|any other|else|next|other|další|více|ještě|také|další|podobné/i;
+            
+            if (followUpPhrases.test(userInput)) {
+                return true;
+            }
+            
+            // Check for very short queries that likely reference previous context
+            if (userInput.split(/\s+/).length < 4 && conversationState.currentSearchCriteria) {
+                return true;
+            }
+            
+            // Check for queries that only specify one parameter but we have other parameters saved
+            const hasOnlySize = /\d+\s*(?:sq\s*m|sqm|square meter|m2|metr)/i.test(userInput) && 
+                               !/office|retail|industrial|prague|brno|ostrava|kancelář|obchod|průmysl/i.test(userInput);
+            
+            const hasOnlyLocation = /prague|praha|brno|ostrava/i.test(userInput) && 
+                                   !/\d+\s*(?:sq\s*m|sqm|square meter|m2|metr)|office|retail|industrial|kancelář|obchod|průmysl/i.test(userInput);
+            
+            const hasOnlyType = /office|retail|industrial|kancelář|obchod|průmysl/i.test(userInput) && 
+                                !/\d+\s*(?:sq\s*m|sqm|square meter|m2|metr)|prague|praha|brno|ostrava/i.test(userInput);
+            
+            if ((hasOnlySize || hasOnlyLocation || hasOnlyType) && conversationState.currentSearchCriteria) {
+                return true;
+            }
+            
+            return false;
+        }
+
+        // UPDATED: Enhanced property search function
+        function enhancedSearchProperties(criteria) {
+            debugLog("Searching properties with criteria:", criteria);
+            let results = [...properties];
+            
+            // Filter by property type
+            if (criteria.type) {
+                const typeKeywords = criteria.type.toLowerCase().split(/\s+/);
+                results = results.filter(p => {
+                    if (!p.type) return false;
+                    const propertyType = p.type.toLowerCase();
+                    return typeKeywords.some(keyword => propertyType.includes(keyword));
+                });
+                debugLog(`After type filter: ${results.length} properties remaining`);
+            }
+            
+            // Filter by location (city or district)
+            if (criteria.location) {
+                const locationKeywords = criteria.location.toLowerCase().split(/\s+/);
+                results = results.filter(p => {
+                    const propertyLocation = (p.location || "").toLowerCase();
+                    const propertyCity = (p.city || "").toLowerCase();
+                    const propertyDistrict = (p.district || "").toLowerCase();
+                    
+                    return locationKeywords.some(keyword => 
+                        propertyLocation.includes(keyword) || 
+                        propertyCity.includes(keyword) || 
+                        propertyDistrict.includes(keyword)
+                    );
+                });
+                debugLog(`After location filter: ${results.length} properties remaining`);
+            }
+            
+            // Enhanced size filtering logic
+            const handleSizeFiltering = () => {
+                if (criteria.size) {
+                    // Target size with tolerance
+                    const targetSize = parseInt(criteria.size);
+                    if (!isNaN(targetSize)) {
+                        // More precise size range - 20% deviation
+                        const minSize = targetSize * 0.8;
+                        const maxSize = targetSize * 1.2;
+                        
+                        results = results.filter(p => {
+                            const propertySize = parseInt(p.size);
+                            return !isNaN(propertySize) && propertySize >= minSize && propertySize <= maxSize;
+                        });
+                        debugLog(`After size (approx ${criteria.size}) filter: ${results.length} properties remaining`);
+                    }
+                } else {
+                    // Handle explicit min/max size if provided
+                    if (criteria.maxSize) {
+                        const maxSize = parseInt(criteria.maxSize);
+                        if (!isNaN(maxSize)) {
+                            results = results.filter(p => {
+                                const propertySize = parseInt(p.size);
+                                return !isNaN(propertySize) && propertySize <= maxSize;
+                            });
+                            debugLog(`After maxSize (${criteria.maxSize}) filter: ${results.length} properties remaining`);
+                        }
+                    }
+                    
+                    if (criteria.minSize) {
+                        const minSize = parseInt(criteria.minSize);
+                        if (!isNaN(minSize)) {
+                            results = results.filter(p => {
+                                const propertySize = parseInt(p.size);
+                                return !isNaN(propertySize) && propertySize >= minSize;
+                            });
+                            debugLog(`After minSize (${criteria.minSize}) filter: ${results.length} properties remaining`);
+                        }
+                    }
+                }
+            };
+            
+            handleSizeFiltering();
+            
+            // Filter by price
+            if (criteria.price) {
+                results = results.filter(p => {
+                    if (!p.price) return false;
+                    return p.price.toLowerCase().includes(criteria.price.toLowerCase());
+                });
+                debugLog(`After price filter: ${results.length} properties remaining`);
+            }
+            
+            // Filter by availability
+            if (criteria.available) {
+                const availableKeywords = criteria.available.toLowerCase().split(/\s+/);
+                results = results.filter(p => {
+                    if (!p.available) return false;
+                    const propertyAvailable = p.available.toLowerCase();
+                    return availableKeywords.some(keyword => propertyAvailable.includes(keyword));
+                });
+                debugLog(`After availability filter: ${results.length} properties remaining`);
+            }
+            
+            // Exclude specific properties if needed
+            if (criteria.excludeNames && criteria.excludeNames.length > 0) {
+                results = results.filter(p => !criteria.excludeNames.includes(p.name));
+                debugLog(`After exclusion filter: ${results.length} properties remaining`);
+            }
+            
+            // If no results and we have size criteria, try with more relaxed size constraints
+            if (results.length === 0 && (criteria.size || criteria.minSize || criteria.maxSize)) {
+                debugLog("No results with strict size criteria, trying with relaxed size constraints");
+                
+                // Reset results
+                results = [...properties];
+                
+                // Reapply non-size filters
+                if (criteria.type) {
+                    const typeKeywords = criteria.type.toLowerCase().split(/\s+/);
+                    results = results.filter(p => {
+                        if (!p.type) return false;
+                        const propertyType = p.type.toLowerCase();
+                        return typeKeywords.some(keyword => propertyType.includes(keyword));
+                    });
+                }
+                
+                if (criteria.location) {
+                    const locationKeywords = criteria.location.toLowerCase().split(/\s+/);
+                    results = results.filter(p => {
+                        const propertyLocation = (p.location || "").toLowerCase();
+                        const propertyCity = (p.city || "").toLowerCase();
+                        const propertyDistrict = (p.district || "").toLowerCase();
+                        
+                        return locationKeywords.some(keyword => 
+                            propertyLocation.includes(keyword) || 
+                            propertyCity.includes(keyword) || 
+                            propertyDistrict.includes(keyword)
+                        );
+                    });
+                }
+                
+                // Apply more relaxed size constraints (30% instead of 20%)
+                if (criteria.size) {
+                    const targetSize = parseInt(criteria.size);
+                    if (!isNaN(targetSize)) {
+                        const minSize = targetSize * 0.7;
+                        const maxSize = targetSize * 1.3;
+                        
+                        results = results.filter(p => {
+                            const propertySize = parseInt(p.size);
+                            return !isNaN(propertySize) && propertySize >= minSize && propertySize <= maxSize;
+                        });
+                        debugLog(`After relaxed size filter: ${results.length} properties remaining`);
+                    }
+                } else {
+                    // Relax explicit min/max by 10%
+                    if (criteria.maxSize) {
+                        const maxSize = parseInt(criteria.maxSize) * 1.1;
+                        if (!isNaN(maxSize)) {
+                            results = results.filter(p => {
+                                const propertySize = parseInt(p.size);
+                                return !isNaN(propertySize) && propertySize <= maxSize;
+                            });
+                        }
+                    }
+                    
+                    if (criteria.minSize) {
+                        const minSize = parseInt(criteria.minSize) * 0.9;
+                        if (!isNaN(minSize)) {
+                            results = results.filter(p => {
+                                const propertySize = parseInt(p.size);
+                                return !isNaN(propertySize) && propertySize >= minSize;
+                            });
+                        }
+                    }
+                }
+                
+                debugLog(`After relaxed size criteria: ${results.length} properties remaining`);
+            }
+            
+            debugLog(`Final search results: ${results.length} properties`);
+            return results;
+        }
+
+        // UPDATED: Improved local response generator with better context handling
+        function generateLocalResponse(userInput) {
+            debugLog("Generating local response for:", userInput);
+            userInput = userInput.toLowerCase();
+            
+            // Check if properties are loaded
+            if (!propertiesLoaded || properties.length === 0) {
+                debugLog("Properties not loaded, returning error message");
+                return "I don't have access to our property listings at the moment. Please try again later or contact Integis directly for assistance.";
+            }
+            
+            // Determine language for response (simple heuristic)
+            const isCzech = /[áčďéěíňóřšťúůýž]/i.test(userInput);
+            debugLog("Language detection - isCzech:", isCzech);
+            
+            // Check if this is a follow-up question
+            const isFollowUp = isFollowUpQuestion(userInput);
+            debugLog("Is follow-up question:", isFollowUp);
+            
+            // Create search criteria object - IMPORTANT: This is where we maintain context
+            let criteria = {};
+            
+            // If follow-up, start with previous criteria
+            if (isFollowUp && conversationState.currentSearchCriteria) {
+                criteria = {...conversationState.currentSearchCriteria};
+                debugLog("Using previous search criteria as base:", criteria);
+                
+                // For pagination requests, keep the same criteria but update offset
+                if (/more|další|show more|ukázat více/i.test(userInput)) {
+                    conversationState.offset += 5; // Show next 5 results
+                    debugLog("Pagination request - updating offset to:", conversationState.offset);
+                }
+            } else {
+                // Reset offset for new searches
+                conversationState.offset = 0;
+            }
+            
+            // Extract new criteria from current input
+            // These will override or supplement previous criteria
+            
+            // Check for property type
+            if (/office|kancelář/i.test(userInput)) {
+                criteria.type = "office";
+            } else if (/retail|obchod/i.test(userInput)) {
+                criteria.type = "retail";
+            } else if (/industrial|průmysl|sklad/i.test(userInput)) {
+                criteria.type = "industrial";
+            }
+            
+            // Check for location
+            if (/prague|praha/i.test(userInput)) {
+                criteria.location = "Prague";
+                
+                // Check for Prague district
+                const pragueDistrictMatch = userInput.match(/prague\s*(\d+)|praha\s*(\d+)/i);
+                if (pragueDistrictMatch && (pragueDistrictMatch[1] || pragueDistrictMatch[2])) {
+                    criteria.location = `Prague ${pragueDistrictMatch[1] || pragueDistrictMatch[2]}`;
+                }
+            } else if (/brno/i.test(userInput)) {
+                criteria.location = "Brno";
+            } else if (/ostrava/i.test(userInput)) {
+                criteria.location = "Ostrava";
+            }
+            
+            // Check for size
+            const sizeMatch = userInput.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2|metr)/i);
+            if (sizeMatch) {
+                criteria.size = sizeMatch[1];
+            }
+            
+            // Check for "less than" or "under" size specification
+            const underSizeMatch = userInput.match(/(?:less than|under|smaller than|max|maximum|do|méně než|pod|maximálně)\s*(\d+)/i);
+            if (underSizeMatch) {
+                criteria.maxSize = underSizeMatch[1];
+            }
+            
+            // Check for "more than" or "over" size specification
+            const overSizeMatch = userInput.match(/(?:more than|over|larger than|min|minimum|nad|více než|minimálně)\s*(\d+)/i);
+            if (overSizeMatch) {
+                criteria.minSize = overSizeMatch[1];
+            }
+            
+            // Check for price mentions
+            if (/€|eur|euro|czk|kč|price|cost|rent|nájem/i.test(userInput)) {
+                criteria.price = ""; // Just flag that price is important
+            }
+            
+            // Check for availability mentions
+            if (/available|now|immediately|ihned|dostupn/i.test(userInput)) {
+                criteria.available = "now";
+            } else if (/q[1-4]|quarter|quartal|kvartál|202[0-9]/i.test(userInput)) {
+                criteria.available = ""; // Just flag that specific availability is important
+            }
+            
+            // For requests to "show all" - start fresh with just the core criteria
+            if (/show all|share all|all properties|all units|všechny|všechny jednotky/i.test(userInput)) {
+                // Keep only the most important criteria (type, location, size) and reset pagination
+                const coreCriteria = {};
+                if (criteria.type) coreCriteria.type = criteria.type;
+                if (criteria.location) coreCriteria.location = criteria.location;
+                if (criteria.size) coreCriteria.size = criteria.size;
+                if (criteria.maxSize) coreCriteria.maxSize = criteria.maxSize;
+                if (criteria.minSize) coreCriteria.minSize = criteria.minSize;
+                
+                criteria = coreCriteria;
+                conversationState.offset = 0;
+                debugLog("'Show all' request - using core criteria only:", criteria);
+            }
+            
+            // IMPORTANT: Update the global conversation state with the new criteria
+            conversationState.currentSearchCriteria = {...criteria};
+            debugLog("Updated conversation state with new criteria:", conversationState.currentSearchCriteria);
+            
+            // Search for matching properties with enhanced search function
+            let matchedProperties = enhancedSearchProperties(criteria);
+            
+            // Store the properties we've shown for follow-up questions
+            if (matchedProperties.length > 0) {
+                const propertiesToShow = matchedProperties.slice(
+                    conversationState.offset, 
+                    conversationState.offset + 5
+                );
+                
+                // Update last shown properties
+                conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
+                debugLog("Updated last shown properties:", conversationState.lastShownProperties);
+            }
+            
+            // Generate response
+            if (matchedProperties.length > 0) {
+                debugLog(`Generating response with ${matchedProperties.length} matching properties (offset: ${conversationState.offset})`);
+                
+                let response = "";
+                
+                if (isFollowUp && /more|další|show more|ukázat více/i.test(userInput) && conversationState.offset > 0) {
+                    response = isCzech 
+                        ? `Ano, zde jsou další nemovitosti, které splňují vaše kritéria:<br><br>`
+                        : `Yes, here are more properties that match your criteria:<br><br>`;
+                } else if (isFollowUp) {
+                    if (criteria.location && criteria.type && criteria.size) {
+                        response = isCzech 
+                            ? `Našel jsem tyto ${criteria.type} prostory v lokalitě ${criteria.location} o velikosti kolem ${criteria.size} m²:<br><br>`
+                            : `I found these ${criteria.type} spaces in ${criteria.location} with a size around ${criteria.size} sqm:<br><br>`;
+                    } else {
+                        response = isCzech 
+                            ? `Na základě upřesněných kritérií jsem našel tyto nemovitosti:<br><br>`
+                            : `Based on your refined criteria, I found these properties:<br><br>`;
+                    }
+                } else {
+                    response = isCzech 
+                        ? `Na základě vašeho dotazu jsem našel tyto nemovitosti, které by vás mohly zajímat:<br><br>`
+                        : `Based on your query, I found these properties that might interest you:<br><br>`;
+                }
+                
+                // Get the relevant slice for pagination
+                const propertiesToShow = matchedProperties.slice(
+                    conversationState.offset, 
+                    conversationState.offset + 5
+                );
+                
+                // If no properties to show at current offset but we have matches
+                if (propertiesToShow.length === 0 && matchedProperties.length > 0) {
+                    // Reset offset to 0 and show the first page
+                    conversationState.offset = 0;
+                    const propertiesToShow = matchedProperties.slice(0, 5);
+                    
+                    response = isCzech 
+                        ? `Došli jsme na konec výsledků. Zde jsou znovu první nemovitosti:<br><br>`
+                        : `We've reached the end of the results. Here are the first properties again:<br><br>`;
+                        
+                    conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
+                }
+                
+                // Format property items
+                propertiesToShow.forEach(property => {
+                    let propertyDetails = `<div class="property-item">
+                        <div class="property-name">${property.name}</div>`;
+                    
+                    propertyDetails += `<div class="property-details">`;
+                    
+                    if (property.size) {
+                        propertyDetails += `<span class="property-detail">${property.size} sqm</span>`;
+                    }
+                    
+                    if (property.type) {
+                        propertyDetails += `<span class="property-detail">${property.type}</span>`;
+                    }
+                    
+                    if (property.price) {
+                        propertyDetails += `<span class="property-detail">${property.price}</span>`;
+                    }
+                    
+                    if (property.floor) {
+                        propertyDetails += `<span class="property-detail">${property.floor}</span>`;
+                    }
+                    
+                    // Use location if available, otherwise fallback to city and district
+                    if (property.location) {
+                        propertyDetails += `<span class="property-detail">${property.location}</span>`;
+                    } else if (property.city) {
+                        let locationText = property.city;
+                        if (property.district) {
+                            locationText += ` - ${property.district}`;
+                        }
+                        propertyDetails += `<span class="property-detail">${locationText}</span>`;
+                    }
+                    
+                    if (property.available) {
+                        propertyDetails += `<span class="property-detail">Available: ${property.available}</span>`;
+                    }
+                    
+                    propertyDetails += `</div></div>`;
+                    
+                    response += propertyDetails;
+                });
+                
+                // Add pagination information
+                const remainingCount = matchedProperties.length - (conversationState.offset + propertiesToShow.length);
+                if (remainingCount > 0) {
+                    response += isCzech
+                        ? `<br>Zobrazuji ${conversationState.offset + 1}-${conversationState.offset + propertiesToShow.length} z ${matchedProperties.length} nalezených nemovitostí. Napište "více" pro zobrazení dalších.`
+                        : `<br>Showing ${conversationState.offset + 1}-${conversationState.offset + propertiesToShow.length} of ${matchedProperties.length} matching properties. Type "more" to see more.`;
+                } else {
+                    response += isCzech
+                        ? `<br>Zobrazuji ${propertiesToShow.length} z ${matchedProperties.length} nalezených nemovitostí.`
+                        : `<br>Showing ${propertiesToShow.length} of ${matchedProperties.length} matching properties.`;
+                }
+                
+                // Add follow-up prompt
+                response += isCzech
+                    ? `<br><br>Přejete si více informací o některé z těchto nemovitostí nebo chcete upřesnit vyhledávání?`
+                    : `<br><br>Would you like more details about any of these properties or would you like to refine your search?`;
+                    
+                return response;
+            } else {
+                debugLog("No matching properties found");
+                
+                let noMatchResponse = "";
+                
+                if (isFollowUp) {
+                    noMatchResponse = isCzech
+                        ? `Bohužel jsem nenašel žádné nemovitosti, které by odpovídaly těmto upřesněným požadavkům. Možná zkuste jiné parametry?`
+                        : `I couldn't find any properties matching these refined criteria. Perhaps try different parameters?`;
+                        
+                    // Suggest alternatives by relaxing constraints
+                    if (criteria.size && criteria.location && criteria.type) {
+                        // Try without size constraint
+                        const withoutSizeSearch = {...criteria};
+                        delete withoutSizeSearch.size;
+                        delete withoutSizeSearch.maxSize;
+                        delete withoutSizeSearch.minSize;
+                        
+                        const sizeAlternatives = enhancedSearchProperties(withoutSizeSearch);
+                        
+                        if (sizeAlternatives.length > 0) {
+                            noMatchResponse += isCzech
+                                ? `<br><br>Našel jsem však ${sizeAlternatives.length} ${criteria.type} nemovitostí v lokalitě ${criteria.location} bez omezení velikosti. Přejete si je zobrazit?`
+                                : `<br><br>However, I found ${sizeAlternatives.length} ${criteria.type} properties in ${criteria.location} without size restrictions. Would you like to see them?`;
+                        }
+                    }
+                } else {
+                    noMatchResponse = isCzech
+                        ? `Bohužel jsem nenašel přesné shody pro vaše kritéria z našich ${properties.length} nemovitostí. Můžete zkusit obecnější vyhledávání? Například se můžete zeptat na "kancelářské prostory v Praze" nebo "obchodní prostory kolem 800 sqm".`
+                        : `I couldn't find exact matches for your criteria from our ${properties.length} properties. Could you try a more general search? For example, you can ask about "office space in Prague" or "retail space around 800 sqm".`;
+                }
+                
+                return noMatchResponse;
+            }
+        }
+
+        // UPDATED: Hugging Face API call with improved context
         async function callHuggingFaceAPI(userInput) {
             debugLog("Starting Hugging Face API call for input:", userInput);
             
@@ -366,17 +863,23 @@
             // Format conversation history in the format expected by Llama-2-7b-chat-hf
             const formattedConversation = [];
             
-            // Add system message
+            // Add system message with context preservation hints
             const systemMessage = {
                 role: "system",
                 content: `You are a professional commercial real estate assistant for Integis. Your job is to help clients find the perfect office, retail, or industrial space based on their needs. Be concise, professional, and helpful.
 
 IMPORTANT INSTRUCTIONS:
-1. Always maintain conversation context and remember previous user inquiries
-2. If the user asks follow-up questions, refer to properties mentioned earlier
-3. When presenting properties, format them in an easy-to-read way
-4. If you don't have information, be honest and offer to help in other ways
-5. Always respond in the same language as the user (Czech or English)
+1. ALWAYS maintain conversation context throughout the entire chat session
+2. Remember previous searches and parameters
+3. When user asks follow-up questions, add to their previous search criteria instead of replacing it
+4. If they ask for "offices in Ostrava under 100 sqm" and then later ask "what about in Prague?", keep the type (office) and size (under 100 sqm) but change the location
+5. When presenting properties, format them in an easy-to-read way
+6. If you don't have information, be honest and offer to help in other ways
+7. Always respond in the same language as the user (Czech or English)
+
+CONVERSATION CONTEXT:
+Current Search Criteria: ${JSON.stringify(conversationState.currentSearchCriteria || {})}
+Last Shown Properties: ${JSON.stringify(conversationState.lastShownProperties || [])}
 
 AVAILABLE PROPERTIES:
 ${propertiesText}`
@@ -385,6 +888,7 @@ ${propertiesText}`
             formattedConversation.push(systemMessage);
             
             // Add past conversation messages (excluding the welcome message)
+            // Make sure we add ALL relevant conversations for context
             for (let i = 1; i < conversationHistory.length; i++) {
                 const message = conversationHistory[i];
                 formattedConversation.push({
@@ -402,10 +906,10 @@ ${propertiesText}`
             debugLog("Prepared conversation messages for API:", formattedConversation.length + " messages");
             
             try {
+                // IMPORTANT: Corrected API endpoint and parameters
+                // Check if the model ID is correct - it should be exactly as specified on Hugging Face
                 debugLog("Sending API request to Hugging Face endpoint:", `https://api-inference.huggingface.co/models/${MODEL_ID}`);
-                debugLog("Using token (first 5 chars):", HUGGING_FACE_TOKEN.substring(0, 5) + "...");
                 
-                // Using the Transformers pipeline approach, as shown in the documentation
                 const response = await fetch(`https://api-inference.huggingface.co/models/${MODEL_ID}`, {
                     method: 'POST',
                     headers: {
@@ -414,14 +918,14 @@ ${propertiesText}`
                     },
                     body: JSON.stringify({
                         inputs: {
-                            // Use the format expected by the chat model
-                            messages: formattedConversation
+                            text: `<s>[INST] ${systemMessage.content}\n\nCurrent User Question: ${userInput} [/INST]`
                         },
                         parameters: {
                             max_new_tokens: 400,
                             temperature: 0.7,
                             top_p: 0.95,
-                            do_sample: true
+                            do_sample: true,
+                            return_full_text: false
                         }
                     })
                 });
@@ -487,315 +991,6 @@ ${propertiesText}`
             }
         }
 
-        // Enhanced property search function with more precise size filtering
-        function searchProperties(criteria) {
-            debugLog("Searching properties with criteria:", criteria);
-            let results = [...properties];
-            
-            // Filter by property type
-            if (criteria.type) {
-                const typeKeywords = criteria.type.toLowerCase().split(/\s+/);
-                results = results.filter(p => {
-                    if (!p.type) return false;
-                    const propertyType = p.type.toLowerCase();
-                    return typeKeywords.some(keyword => propertyType.includes(keyword));
-                });
-                debugLog(`After type filter: ${results.length} properties remaining`);
-            }
-            
-            // Filter by location (city or district)
-            if (criteria.location) {
-                const locationKeywords = criteria.location.toLowerCase().split(/\s+/);
-                results = results.filter(p => {
-                    const propertyLocation = (p.location || "").toLowerCase();
-                    const propertyCity = (p.city || "").toLowerCase();
-                    const propertyDistrict = (p.district || "").toLowerCase();
-                    
-                    return locationKeywords.some(keyword => 
-                        propertyLocation.includes(keyword) || 
-                        propertyCity.includes(keyword) || 
-                        propertyDistrict.includes(keyword)
-                    );
-                });
-                debugLog(`After location filter: ${results.length} properties remaining`);
-            }
-            
-            // Filter by size range (with more precise targeting)
-            if (criteria.size) {
-                const targetSize = parseInt(criteria.size);
-                if (!isNaN(targetSize)) {
-                    // More precise size range - 20% deviation instead of 30%
-                    const minSize = targetSize * 0.8;
-                    const maxSize = targetSize * 1.2;
-                    
-                    results = results.filter(p => {
-                        const propertySize = parseInt(p.size);
-                        return !isNaN(propertySize) && propertySize >= minSize && propertySize <= maxSize;
-                    });
-                    debugLog(`After size filter: ${results.length} properties remaining`);
-                }
-            }
-            
-            // Filter by price
-            if (criteria.price) {
-                // This could be expanded to handle different currency formats and ranges
-                results = results.filter(p => {
-                    if (!p.price) return false;
-                    return p.price.toLowerCase().includes(criteria.price.toLowerCase());
-                });
-                debugLog(`After price filter: ${results.length} properties remaining`);
-            }
-            
-            // Filter by availability
-            if (criteria.available) {
-                const availableKeywords = criteria.available.toLowerCase().split(/\s+/);
-                results = results.filter(p => {
-                    if (!p.available) return false;
-                    const propertyAvailable = p.available.toLowerCase();
-                    return availableKeywords.some(keyword => propertyAvailable.includes(keyword));
-                });
-                debugLog(`After availability filter: ${results.length} properties remaining`);
-            }
-            
-            // Exclude specific properties if needed
-            if (criteria.excludeNames && criteria.excludeNames.length > 0) {
-                results = results.filter(p => !criteria.excludeNames.includes(p.name));
-                debugLog(`After exclusion filter: ${results.length} properties remaining`);
-            }
-            
-            debugLog(`Final search results: ${results.length} properties`);
-            return results;
-        }
-
-        // Improved local response generator with better follow-up question handling
-        function generateLocalResponse(userInput) {
-            debugLog("Generating local response for:", userInput);
-            userInput = userInput.toLowerCase();
-            
-            // Check if properties are loaded
-            if (!propertiesLoaded || properties.length === 0) {
-                debugLog("Properties not loaded, returning error message");
-                return "I don't have access to our property listings at the moment. Please try again later or contact Integis directly for assistance.";
-            }
-            
-            // Determine the language based on input (simple heuristic)
-            const isCzech = /[áčďéěíňóřšťúůýž]/i.test(userInput);
-            debugLog("Language detection - isCzech:", isCzech);
-            
-            // FOLLOW-UP QUESTION HANDLING - This is the key fix for conversation continuity
-            // Check if this is a follow-up question with no specific parameters
-            const isFollowUp = /more|additional|another|further|similar|like that|such|tell me more|show more|any other|else|next|other|více|další|podobné|jako|ukázat|ještě/i.test(userInput);
-            
-            // Get the previous search criteria from conversation history
-            let previousCriteria = null;
-            if (isFollowUp && conversationHistory.length >= 3) {
-                // Find the last bot response and user query
-                const lastBotMessage = conversationHistory.filter(msg => msg.role === "assistant").pop();
-                const previousUserMessage = conversationHistory.filter(msg => msg.role === "user").slice(-2)[0];
-                
-                if (lastBotMessage && lastBotMessage.content.includes("property-item") && previousUserMessage) {
-                    debugLog("This appears to be a follow-up question to:", previousUserMessage.content);
-                    
-                    // Parse the previous user message to extract criteria
-                    previousCriteria = {};
-                    
-                    // Check for property type in previous message
-                    if (/office|kancelář/i.test(previousUserMessage.content)) {
-                        previousCriteria.type = "office";
-                    } else if (/retail|obchod/i.test(previousUserMessage.content)) {
-                        previousCriteria.type = "retail";
-                    } else if (/industrial|průmysl|sklad/i.test(previousUserMessage.content)) {
-                        previousCriteria.type = "industrial";
-                    }
-                    
-                    // Check for location in previous message
-                    if (/prague|praha/i.test(previousUserMessage.content)) {
-                        previousCriteria.location = "Prague";
-                        
-                        // Check for Prague district
-                        const pragueDistrictMatch = previousUserMessage.content.match(/prague\s*(\d+)|praha\s*(\d+)/i);
-                        if (pragueDistrictMatch && (pragueDistrictMatch[1] || pragueDistrictMatch[2])) {
-                            previousCriteria.location = `Prague ${pragueDistrictMatch[1] || pragueDistrictMatch[2]}`;
-                        }
-                    } else if (/brno/i.test(previousUserMessage.content)) {
-                        previousCriteria.location = "Brno";
-                    } else if (/ostrava/i.test(previousUserMessage.content)) {
-                        previousCriteria.location = "Ostrava";
-                    }
-                    
-                    // Check for size in previous message
-                    const sizeMatch = previousUserMessage.content.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2|metr)/i);
-                    if (sizeMatch) {
-                        previousCriteria.size = sizeMatch[1];
-                    }
-                    
-                    // Extract property names that were already shown
-                    const shownPropertyNames = [];
-                    const propertyRegex = /<div class="property-name">(.*?)<\/div>/g;
-                    let match;
-                    while ((match = propertyRegex.exec(lastBotMessage.content)) !== null) {
-                        shownPropertyNames.push(match[1]);
-                    }
-                    
-                    // Save the shown property names to exclude them when searching for "more"
-                    previousCriteria.excludeNames = shownPropertyNames;
-                    
-                    debugLog("Extracted previous search criteria:", previousCriteria);
-                }
-            }
-            
-            // Create a search criteria object based on current user input
-            const criteria = previousCriteria || {};
-            
-            // Only update criteria if this is not a follow-up question or if new criteria are specified
-            if (!isFollowUp || !previousCriteria) {
-                // Check for property type
-                if (/office|kancelář/i.test(userInput)) {
-                    criteria.type = "office";
-                } else if (/retail|obchod/i.test(userInput)) {
-                    criteria.type = "retail";
-                } else if (/industrial|průmysl|sklad/i.test(userInput)) {
-                    criteria.type = "industrial";
-                }
-                
-                // Check for location
-                if (/prague|praha/i.test(userInput)) {
-                    criteria.location = "Prague";
-                    
-                    // Check for Prague district
-                    const pragueDistrictMatch = userInput.match(/prague\s*(\d+)|praha\s*(\d+)/i);
-                    if (pragueDistrictMatch && (pragueDistrictMatch[1] || pragueDistrictMatch[2])) {
-                        criteria.location = `Prague ${pragueDistrictMatch[1] || pragueDistrictMatch[2]}`;
-                    }
-                } else if (/brno/i.test(userInput)) {
-                    criteria.location = "Brno";
-                } else if (/ostrava/i.test(userInput)) {
-                    criteria.location = "Ostrava";
-                }
-                
-                // Check for size
-                const sizeMatch = userInput.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2|metr)/i);
-                if (sizeMatch) {
-                    criteria.size = sizeMatch[1];
-                }
-                
-                // Check for price mentions
-                if (/€|eur|euro|czk|kč|price|cost|rent|nájem/i.test(userInput)) {
-                    criteria.price = ""; // Just flag that price is important
-                }
-                
-                // Check for availability mentions
-                if (/available|now|immediately|ihned|dostupn/i.test(userInput)) {
-                    criteria.available = "now";
-                } else if (/q[1-4]|quarter|quartal|kvartál|202[0-9]/i.test(userInput)) {
-                    criteria.available = ""; // Just flag that specific availability is important
-                }
-            }
-            
-            debugLog("Final search criteria:", criteria);
-            
-            // Search for matching properties
-            let matchedProperties = searchProperties(criteria);
-            
-            // If this is a follow-up question looking for "more", exclude already shown properties
-            if (isFollowUp && criteria.excludeNames && criteria.excludeNames.length > 0) {
-                debugLog(`Excluding ${criteria.excludeNames.length} previously shown properties`);
-                matchedProperties = matchedProperties.filter(p => 
-                    !criteria.excludeNames.includes(p.name)
-                );
-                debugLog(`After exclusion: ${matchedProperties.length} properties remaining`);
-            }
-            
-            // Generate response
-            if (matchedProperties.length > 0) {
-                debugLog(`Generating response with ${matchedProperties.length} matching properties`);
-                
-                let response = "";
-                if (isFollowUp && previousCriteria) {
-                    response = isCzech 
-                        ? `Ano, zde jsou další podobné nemovitosti, které splňují vaše kritéria:<br><br>`
-                        : `Yes, here are more properties that match your criteria:<br><br>`;
-                } else {
-                    response = isCzech 
-                        ? `Na základě vašeho dotazu jsem našel tyto nemovitosti, které by vás mohly zajímat:<br><br>`
-                        : `Based on your query, I found these properties that might interest you:<br><br>`;
-                }
-                
-                // Limit to top 5 properties
-                const propertiesToShow = matchedProperties.slice(0, 5);
-                
-                propertiesToShow.forEach(property => {
-                    let propertyDetails = `<div class="property-item">
-                        <div class="property-name">${property.name}</div>`;
-                    
-                    propertyDetails += `<div class="property-details">`;
-                    
-                    if (property.size) {
-                        propertyDetails += `<span class="property-detail">${property.size} sqm</span>`;
-                    }
-                    
-                    if (property.type) {
-                        propertyDetails += `<span class="property-detail">${property.type}</span>`;
-                    }
-                    
-                    if (property.price) {
-                        propertyDetails += `<span class="property-detail">${property.price}</span>`;
-                    }
-                    
-                    if (property.floor) {
-                        propertyDetails += `<span class="property-detail">${property.floor}</span>`;
-                    }
-                    
-                    // Use location if available, otherwise fallback to city and district
-                    if (property.location) {
-                        propertyDetails += `<span class="property-detail">${property.location}</span>`;
-                    } else if (property.city) {
-                        let locationText = property.city;
-                        if (property.district) {
-                            locationText += ` - ${property.district}`;
-                        }
-                        propertyDetails += `<span class="property-detail">${locationText}</span>`;
-                    }
-                    
-                    if (property.available) {
-                        propertyDetails += `<span class="property-detail">Available: ${property.available}</span>`;
-                    }
-                    
-                    propertyDetails += `</div></div>`;
-                    
-                    response += propertyDetails;
-                });
-                
-                if (matchedProperties.length > 5) {
-                    response += isCzech
-                        ? `<br>A dalších ${matchedProperties.length - 5} odpovídajících nemovitostí.`
-                        : `<br>And ${matchedProperties.length - 5} more matching properties.`;
-                } else if (matchedProperties.length <= 5 && isFollowUp) {
-                    response += isCzech
-                        ? `<br>To jsou všechny další nemovitosti, které odpovídají vašim kritériím.`
-                        : `<br>These are all the additional properties that match your criteria.`;
-                }
-                
-                response += isCzech
-                    ? `<br>Přejete si více informací o některé z těchto nemovitostí?`
-                    : `<br>Would you like more details about any of these properties?`;
-                    
-                return response;
-            } else {
-                debugLog("No matching properties found");
-                
-                if (isFollowUp && previousCriteria) {
-                    return isCzech
-                        ? `Bohužel jsem nenašel žádné další nemovitosti, které by odpovídaly vašim kritériím. Chcete změnit některé z požadavků?`
-                        : `I couldn't find any more properties matching your criteria. Would you like to change some of your requirements?`;
-                } else {
-                    return isCzech
-                        ? `Bohužel jsem nenašel přesné shody pro vaše kritéria z našich ${properties.length} nemovitostí. Můžete zkusit obecnější vyhledávání? Například se můžete zeptat na "kancelářské prostory v Praze" nebo "obchodní prostory kolem 800 sqm".`
-                        : `I couldn't find exact matches for your criteria from our ${properties.length} properties. Could you try a more general search? For example, you can ask about "office space in Prague" or "retail space around 800 sqm".`;
-                }
-            }
-        }
-
         // Function to add a message to the chat
         function addMessage(text, sender) {
             const messagesDiv = document.getElementById('messages');
@@ -821,12 +1016,15 @@ ${propertiesText}`
             return messageDiv;
         }
 
-        // Enhanced function to handle sending messages with better debugging and prioritizing local response
+        // UPDATED: Improved sendMessage function
         async function sendMessage() {
             const userInput = document.getElementById('user-input');
             if (!userInput.value.trim()) return;
             
             debugLog("User input:", userInput.value);
+            
+            // Save to conversation state before clearing
+            conversationState.lastQuery = userInput.value;
             
             // Add user message
             addMessage(userInput.value, 'user');
@@ -857,7 +1055,7 @@ ${propertiesText}`
             const fallbackResponse = generateLocalResponse(userMessage);
             debugLog("Generated fallback response");
             
-            // If our fallback found matches, prioritize it for instant response
+            // If our fallback found property matches, prioritize it for instant response
             const containsPropertyItems = fallbackResponse.includes("property-item");
             
             if (containsPropertyItems) {
@@ -865,6 +1063,10 @@ ${propertiesText}`
                 if (document.getElementById('typing-indicator')) {
                     document.getElementById('typing-indicator').remove();
                 }
+                
+                // Save this response to conversation state
+                conversationState.lastResponse = fallbackResponse;
+                
                 addMessage(fallbackResponse, 'bot');
                 
                 // Add to conversation history
@@ -890,6 +1092,10 @@ ${propertiesText}`
                 if (document.getElementById('typing-indicator')) {
                     document.getElementById('typing-indicator').remove();
                 }
+                
+                // Save this response to conversation state
+                conversationState.lastResponse = aiResponse;
+                
                 addMessage(aiResponse, 'bot');
                 
                 // Add to conversation history
@@ -900,6 +1106,10 @@ ${propertiesText}`
                 if (document.getElementById('typing-indicator')) {
                     document.getElementById('typing-indicator').remove();
                 }
+                
+                // Save this response to conversation state
+                conversationState.lastResponse = fallbackResponse;
+                
                 addMessage(fallbackResponse, 'bot');
                 
                 // Add to conversation history
