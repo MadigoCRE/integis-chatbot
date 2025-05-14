@@ -191,9 +191,8 @@
         let properties = [];
         let propertiesLoaded = false;
         
-        // Conversation history
+        // Conversation history - store the entire conversation
         let conversationHistory = [];
-        const MAX_CONVERSATION_LENGTH = 6; // Maximum number of exchanges to remember
 
         // Function to load properties from JSON file
         async function loadProperties() {
@@ -266,100 +265,14 @@
             }
         });
 
-        // Function to handle sending messages
-        async function sendMessage() {
-            const userInput = document.getElementById('user-input');
-            if (!userInput.value.trim()) return;
-            
-            // Add user message
-            addMessage(userInput.value, 'user');
-            
-            // Add to conversation history
-            conversationHistory.push({role: "user", content: userInput.value});
-            
-            // Limit conversation history length (remove oldest exchanges but keep the welcome message)
-            if (conversationHistory.length > MAX_CONVERSATION_LENGTH * 2 + 1) {
-                // Keep the first message and the last MAX_CONVERSATION_LENGTH*2 messages
-                conversationHistory = [
-                    conversationHistory[0],
-                    ...conversationHistory.slice(-(MAX_CONVERSATION_LENGTH * 2))
-                ];
-            }
-            
-            // Clear input and store message
-            const userMessage = userInput.value;
-            userInput.value = '';
-            
-            // Show typing indicator
-            const typingIndicator = document.createElement('div');
-            typingIndicator.className = 'typing-indicator';
-            typingIndicator.textContent = 'Typing...';
-            typingIndicator.id = 'typing-indicator';
-            document.getElementById('messages').appendChild(typingIndicator);
-            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
-            
-            // Ensure properties are loaded
-            if (!propertiesLoaded) {
-                await loadProperties();
-            }
-            
-            // Get response (using Hugging Face API or fallback)
-            try {
-                // Try to call Hugging Face API
-                const aiResponse = await callHuggingFaceAPI(userMessage);
-                if (document.getElementById('typing-indicator')) {
-                    document.getElementById('typing-indicator').remove();
-                }
-                addMessage(aiResponse, 'bot');
-                
-                // Add to conversation history
-                conversationHistory.push({role: "assistant", content: aiResponse});
-            } catch (error) {
-                // Fallback to local response if API fails
-                console.error("Error calling AI:", error);
-                if (document.getElementById('typing-indicator')) {
-                    document.getElementById('typing-indicator').remove();
-                }
-                const fallbackResponse = generateLocalResponse(userMessage);
-                addMessage(fallbackResponse, 'bot');
-                
-                // Add to conversation history
-                conversationHistory.push({role: "assistant", content: fallbackResponse});
-            }
-        }
-
-        // Function to add a message to the chat
-        function addMessage(text, sender) {
-            const messagesDiv = document.getElementById('messages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${sender}-message`;
-            messageDiv.innerHTML = text;
-            
-            // Clear any previous messages with the same float direction
-            const clearDiv = document.createElement('div');
-            clearDiv.className = 'clearfix';
-            messagesDiv.appendChild(clearDiv);
-            
-            messagesDiv.appendChild(messageDiv);
-            
-            // Another clearfix after the message
-            const clearDiv2 = document.createElement('div');
-            clearDiv2.className = 'clearfix';
-            messagesDiv.appendChild(clearDiv2);
-            
-            // Scroll to bottom
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-            
-            return messageDiv;
-        }
-
-        // Function to format conversation history for the prompt
+        // Improved format conversation history function to preserve context better
         function formatConversationHistory() {
-            // Get the last few exchanges (limited by MAX_CONVERSATION_LENGTH)
-            const recentConversation = conversationHistory.slice(-MAX_CONVERSATION_LENGTH * 2);
+            // Get the entire conversation (no arbitrary limits)
+            const conversation = conversationHistory.slice();
             
+            // Format the conversation history in a way that Llama 2 can understand better
             let formattedHistory = "";
-            recentConversation.forEach((exchange) => {
+            conversation.forEach((exchange) => {
                 if (exchange.role === "user") {
                     formattedHistory += `Human: ${exchange.content}\n`;
                 } else {
@@ -370,14 +283,14 @@
             return formattedHistory;
         }
 
-        // Function to call Hugging Face API
+        // Enhanced API call function with better prompt engineering
         async function callHuggingFaceAPI(userInput) {
             // Check if properties are loaded
             if (!propertiesLoaded || properties.length === 0) {
                 return "I don't have access to our property listings at the moment. Please try again later or ask general questions about commercial real estate.";
             }
             
-            // Format properties as text for the prompt
+            // Format properties as text for the prompt - include all properties but in a condensed format
             let propertiesText = "";
             properties.forEach(property => {
                 let detailsText = `- ${property.name}: ${property.size} sqm ${property.type || ""}`;
@@ -386,11 +299,6 @@
                     detailsText += `, ${property.price}`;
                 }
                 
-                if (property.floor) {
-                    detailsText += `, ${property.floor}`;
-                }
-                
-                // Use location if available, otherwise fallback to city and district
                 if (property.location) {
                     detailsText += ` in ${property.location}`;
                 } else if (property.city) {
@@ -411,15 +319,27 @@
             // Get formatted conversation history
             const conversationHistoryText = formatConversationHistory();
 
-            // Llama 2 specific prompt formatting
-            const prompt = `<s>[INST] <<SYS>>
+            // Create an improved system prompt that better instructs the model
+            const systemPrompt = `
 You are a professional commercial real estate assistant for Integis. Your job is to help clients find the perfect office, retail, or industrial space based on their needs. Be concise, professional, and helpful.
+
+IMPORTANT INSTRUCTIONS:
+1. Always maintain conversation context and remember previous user inquiries
+2. If the user asks follow-up questions, refer to properties mentioned earlier
+3. When presenting properties, format them in an easy-to-read way
+4. If you don't have information, be honest and offer to help in other ways
+5. Always respond in the same language as the user (Czech or English)
 
 AVAILABLE PROPERTIES:
 ${propertiesText}
 
 CONVERSATION HISTORY:
 ${conversationHistoryText}
+`;
+
+            // Llama 2 specific prompt formatting with improved context
+            const prompt = `<s>[INST] <<SYS>>
+${systemPrompt}
 <</SYS>>
 
 ${userInput} [/INST]`;
@@ -436,16 +356,17 @@ ${userInput} [/INST]`;
                     body: JSON.stringify({
                         inputs: prompt,
                         parameters: {
-                            max_new_tokens: 500,
+                            max_new_tokens: 800,  // Increased for more detailed responses
                             temperature: 0.7,
                             top_p: 0.95,
-                            do_sample: true
+                            do_sample: true,
+                            return_full_text: false  // Only return the generated text, not the prompt
                         }
                     })
                 });
 
                 const result = await response.json();
-                console.log("API response received");
+                console.log("API response received:", result);
                 
                 // Check for errors or model loading
                 if (result.error) {
@@ -455,10 +376,10 @@ ${userInput} [/INST]`;
                     throw new Error(result.error);
                 }
                 
-                // Extract the generated text from response
+                // Extract the generated text from response with better error handling
                 if (result && result[0] && result[0].generated_text) {
                     const fullText = result[0].generated_text;
-                    // For Llama 2, extract just the response part after the instruction
+                    // For Llama 2, extract just the response part
                     const assistantResponseMatch = fullText.match(/\[\/INST\](.*)/s);
                     const assistantResponse = assistantResponseMatch ? assistantResponseMatch[1].trim() : fullText;
                     return assistantResponse || "I couldn't generate a proper response. Please try again.";
@@ -471,7 +392,73 @@ ${userInput} [/INST]`;
             }
         }
 
-        // Fallback function to generate responses locally (when API fails)
+        // Enhanced property search function
+        function searchProperties(criteria) {
+            let results = [...properties];
+            
+            // Filter by property type
+            if (criteria.type) {
+                const typeKeywords = criteria.type.toLowerCase().split(/\s+/);
+                results = results.filter(p => {
+                    if (!p.type) return false;
+                    const propertyType = p.type.toLowerCase();
+                    return typeKeywords.some(keyword => propertyType.includes(keyword));
+                });
+            }
+            
+            // Filter by location (city or district)
+            if (criteria.location) {
+                const locationKeywords = criteria.location.toLowerCase().split(/\s+/);
+                results = results.filter(p => {
+                    const propertyLocation = (p.location || "").toLowerCase();
+                    const propertyCity = (p.city || "").toLowerCase();
+                    const propertyDistrict = (p.district || "").toLowerCase();
+                    
+                    return locationKeywords.some(keyword => 
+                        propertyLocation.includes(keyword) || 
+                        propertyCity.includes(keyword) || 
+                        propertyDistrict.includes(keyword)
+                    );
+                });
+            }
+            
+            // Filter by size range (with some flexibility)
+            if (criteria.size) {
+                const targetSize = parseInt(criteria.size);
+                if (!isNaN(targetSize)) {
+                    const minSize = targetSize * 0.7;  // 30% below target
+                    const maxSize = targetSize * 1.3;  // 30% above target
+                    
+                    results = results.filter(p => {
+                        const propertySize = parseInt(p.size);
+                        return !isNaN(propertySize) && propertySize >= minSize && propertySize <= maxSize;
+                    });
+                }
+            }
+            
+            // Filter by price
+            if (criteria.price) {
+                // This could be expanded to handle different currency formats and ranges
+                results = results.filter(p => {
+                    if (!p.price) return false;
+                    return p.price.toLowerCase().includes(criteria.price.toLowerCase());
+                });
+            }
+            
+            // Filter by availability
+            if (criteria.available) {
+                const availableKeywords = criteria.available.toLowerCase().split(/\s+/);
+                results = results.filter(p => {
+                    if (!p.available) return false;
+                    const propertyAvailable = p.available.toLowerCase();
+                    return availableKeywords.some(keyword => propertyAvailable.includes(keyword));
+                });
+            }
+            
+            return results;
+        }
+
+        // Enhanced fallback response generator
         function generateLocalResponse(userInput) {
             userInput = userInput.toLowerCase();
             
@@ -480,139 +467,93 @@ ${userInput} [/INST]`;
                 return "I don't have access to our property listings at the moment. Please try again later or contact Integis directly for assistance.";
             }
             
-            // Check for follow-up questions about properties
-            if (conversationHistory.length >= 3) {
-                const lastBotMessage = conversationHistory.filter(msg => msg.role === "assistant").pop().content;
-                const lastUserMessage = userInput;
+            // Determine the language based on input (simple heuristic)
+            const isCzech = /[áčďéěíňóřšťúůýž]/i.test(userInput);
+            
+            // Create a search criteria object based on user input
+            const criteria = {};
+            
+            // Check for property type
+            if (/office|kancelář/i.test(userInput)) {
+                criteria.type = "office";
+            } else if (/retail|obchod/i.test(userInput)) {
+                criteria.type = "retail";
+            } else if (/industrial|průmysl|sklad/i.test(userInput)) {
+                criteria.type = "industrial";
+            }
+            
+            // Check for location
+            if (/prague|praha/i.test(userInput)) {
+                criteria.location = "Prague";
                 
-                // Check if last bot message mentioned properties and user is asking for more details
-                if (lastBotMessage.includes("matching properties") && 
-                    (lastUserMessage.includes("more detail") || 
-                     lastUserMessage.includes("tell me more") || 
-                     lastUserMessage.includes("yes") || 
-                     lastUserMessage.includes("show me") ||
-                     lastUserMessage.includes("please"))) {
-                    
-                    return "Great! Here are more details about the properties I mentioned:<br><br>" + 
-                           "For detailed information about specific properties, please contact our sales team at info@integis.cz or visit our website.";
+                // Check for Prague district
+                const pragueDistrictMatch = userInput.match(/prague\s*(\d+)|praha\s*(\d+)/i);
+                if (pragueDistrictMatch && (pragueDistrictMatch[1] || pragueDistrictMatch[2])) {
+                    criteria.location = `Prague ${pragueDistrictMatch[1] || pragueDistrictMatch[2]}`;
                 }
-            }
-            
-            // Check for greetings
-            if (/hello|hi|hey|greetings/i.test(userInput)) {
-                return "Hello! How can I help you find the perfect commercial property today?";
-            }
-            
-            // Check for property type queries
-            const isOffice = /office|workspace|kanceláře/i.test(userInput);
-            const isRetail = /retail|shop|store|obchody/i.test(userInput);
-            
-            // Check for locations
-            const pragueMatch = /prague|praha/i.test(userInput);
-            const brnoMatch = /brno/i.test(userInput);
-            const ostravaMatch = /ostrava/i.test(userInput);
-            
-            // Check for district
-            let districtMatch = null;
-            if (pragueMatch) {
-                const pragueDistrictRegex = /prague\s*(\d+)|praha\s*(\d+)/i;
-                const match = userInput.match(pragueDistrictRegex);
-                if (match && (match[1] || match[2])) {
-                    districtMatch = match[1] || match[2];
-                }
+            } else if (/brno/i.test(userInput)) {
+                criteria.location = "Brno";
+            } else if (/ostrava/i.test(userInput)) {
+                criteria.location = "Ostrava";
             }
             
             // Check for size
-            const sizeMatches = userInput.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2)/i);
-            
-            // Check for price
-            const priceMatches = userInput.match(/(\d+)\s*(?:€|eur|euro|euros|czk|kč)/i);
-            
-            // Filter properties
-            let matchedProperties = [...properties];
-            
-            if (isOffice) {
-                matchedProperties = matchedProperties.filter(p => 
-                    p.type && (
-                        p.type.toLowerCase().includes('office') || 
-                        p.type.toLowerCase().includes('kanceláře')
-                    )
-                );
-            } else if (isRetail) {
-                matchedProperties = matchedProperties.filter(p => 
-                    p.type && (
-                        p.type.toLowerCase().includes('retail') || 
-                        p.type.toLowerCase().includes('obchody')
-                    )
-                );
+            const sizeMatch = userInput.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2|metr)/i);
+            if (sizeMatch) {
+                criteria.size = sizeMatch[1];
             }
             
-            if (pragueMatch) {
-                matchedProperties = matchedProperties.filter(p => 
-                    (p.city && p.city.toLowerCase().includes('prague')) || 
-                    (p.city && p.city.toLowerCase().includes('praha')) ||
-                    (p.location && p.location.toLowerCase().includes('prague')) ||
-                    (p.location && p.location.toLowerCase().includes('praha'))
-                );
+            // Check for price mentions
+            if (/€|eur|euro|czk|kč|price|cost|rent|nájem/i.test(userInput)) {
+                criteria.price = ""; // Just flag that price is important
+            }
+            
+            // Check for availability mentions
+            if (/available|now|immediately|ihned|dostupn/i.test(userInput)) {
+                criteria.available = "now";
+            } else if (/q[1-4]|quarter|quartal|kvartál|202[0-9]/i.test(userInput)) {
+                criteria.available = ""; // Just flag that specific availability is important
+            }
+            
+            // Search for matching properties
+            let matchedProperties = searchProperties(criteria);
+            
+            // Check for follow-up questions about previously mentioned properties
+            if (matchedProperties.length === 0 && conversationHistory.length >= 3) {
+                const lastBotMessage = conversationHistory.filter(msg => msg.role === "assistant").pop().content;
                 
-                if (districtMatch) {
-                    matchedProperties = matchedProperties.filter(p => 
-                        (p.district && p.district.includes(districtMatch)) ||
-                        (p.location && p.location.includes(districtMatch))
-                    );
-                }
-            } else if (brnoMatch) {
-                matchedProperties = matchedProperties.filter(p => 
-                    (p.city && p.city.toLowerCase().includes('brno')) ||
-                    (p.location && p.location.toLowerCase().includes('brno'))
-                );
-            } else if (ostravaMatch) {
-                matchedProperties = matchedProperties.filter(p => 
-                    (p.city && p.city.toLowerCase().includes('ostrava')) ||
-                    (p.location && p.location.toLowerCase().includes('ostrava'))
-                );
-            }
-            
-            if (sizeMatches) {
-                const requestedSize = parseInt(sizeMatches[1]);
-                const minSize = requestedSize * 0.5;
-                const maxSize = requestedSize * 1.5;
-                
-                matchedProperties = matchedProperties.filter(p => {
-                    const propertySize = parseInt(p.size);
-                    return !isNaN(propertySize) && propertySize >= minSize && propertySize <= maxSize;
-                });
-            }
-            
-            if (priceMatches) {
-                const requestedPrice = parseInt(priceMatches[1]);
-                matchedProperties = matchedProperties.filter(p => {
-                    if (!p.price) return false;
-                    
-                    if (p.price.includes('€')) {
-                        const priceMatch = p.price.match(/€(\d+)/);
-                        if (priceMatch) {
-                            const price = parseInt(priceMatch[1]);
-                            return Math.abs(price - requestedPrice) <= requestedPrice * 0.3;
+                if (lastBotMessage.includes("properties") || lastBotMessage.includes("property")) {
+                    // This might be a follow-up question about previously mentioned properties
+                    if (/more|detail|tell|show|yes|please|více|detail|ukaž|ano|prosím/i.test(userInput)) {
+                        // Try to extract property names from the last message
+                        const propertyRegex = /\b([\w\s]+):\s*\d+\s*sqm/g;
+                        let match;
+                        const mentionedProperties = [];
+                        
+                        while ((match = propertyRegex.exec(lastBotMessage)) !== null) {
+                            mentionedProperties.push(match[1].trim());
                         }
-                    } else if (p.price.includes('CZK')) {
-                        const priceMatch = p.price.match(/(\d+)\s*CZK/);
-                        if (priceMatch) {
-                            const price = parseInt(priceMatch[1]);
-                            return Math.abs(price - requestedPrice) <= requestedPrice * 0.3;
+                        
+                        if (mentionedProperties.length > 0) {
+                            // Filter properties based on names mentioned in the last message
+                            matchedProperties = properties.filter(p => 
+                                mentionedProperties.some(name => 
+                                    p.name.toLowerCase().includes(name.toLowerCase())
+                                )
+                            );
                         }
                     }
-                    
-                    return false;
-                });
+                }
             }
             
-            // Generate response with properties
+            // Generate response
             if (matchedProperties.length > 0) {
-                let response = `Based on your query, I found these properties that might interest you:<br><br>`;
+                let response = isCzech 
+                    ? `Na základě vašeho dotazu jsem našel tyto nemovitosti, které by vás mohly zajímat:<br><br>`
+                    : `Based on your query, I found these properties that might interest you:<br><br>`;
                 
-                // Limit to top 3 properties
-                const propertiesToShow = matchedProperties.slice(0, 3);
+                // Limit to top 5 properties
+                const propertiesToShow = matchedProperties.slice(0, 5);
                 
                 propertiesToShow.forEach(property => {
                     let propertyDetails = `<div class="property-item">
@@ -656,14 +597,105 @@ ${userInput} [/INST]`;
                     response += propertyDetails;
                 });
                 
-                if (matchedProperties.length > 3) {
-                    response += `<br>And ${matchedProperties.length - 3} more matching properties.`;
+                if (matchedProperties.length > 5) {
+                    response += isCzech
+                        ? `<br>A dalších ${matchedProperties.length - 5} odpovídajících nemovitostí.`
+                        : `<br>And ${matchedProperties.length - 5} more matching properties.`;
                 }
                 
-                response += `<br>Would you like more details about any of these properties?`;
+                response += isCzech
+                    ? `<br>Přejete si více informací o některé z těchto nemovitostí?`
+                    : `<br>Would you like more details about any of these properties?`;
+                    
                 return response;
             } else {
-                return `I couldn't find exact matches for your criteria from our ${properties.length} properties. Could you try a more general search? For example, you can ask about "office space in Prague" or "retail space around 800 sqm".`;
+                return isCzech
+                    ? `Bohužel jsem nenašel přesné shody pro vaše kritéria z našich ${properties.length} nemovitostí. Můžete zkusit obecnější vyhledávání? Například se můžete zeptat na "kancelářské prostory v Praze" nebo "obchodní prostory kolem 800 sqm".`
+                    : `I couldn't find exact matches for your criteria from our ${properties.length} properties. Could you try a more general search? For example, you can ask about "office space in Prague" or "retail space around 800 sqm".`;
+            }
+        }
+
+        // Function to add a message to the chat
+        function addMessage(text, sender) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}-message`;
+            messageDiv.innerHTML = text;
+            
+            // Clear any previous messages with the same float direction
+            const clearDiv = document.createElement('div');
+            clearDiv.className = 'clearfix';
+            messagesDiv.appendChild(clearDiv);
+            
+            messagesDiv.appendChild(messageDiv);
+            
+            // Another clearfix after the message
+            const clearDiv2 = document.createElement('div');
+            clearDiv2.className = 'clearfix';
+            messagesDiv.appendChild(clearDiv2);
+            
+            // Scroll to bottom
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            return messageDiv;
+        }
+
+        // Enhanced function to handle sending messages with better conversation handling
+        async function sendMessage() {
+            const userInput = document.getElementById('user-input');
+            if (!userInput.value.trim()) return;
+            
+            // Add user message
+            addMessage(userInput.value, 'user');
+            
+            // Add to conversation history
+            conversationHistory.push({role: "user", content: userInput.value});
+            
+            // Clear input and store message
+            const userMessage = userInput.value;
+            userInput.value = '';
+            
+            // Show typing indicator
+            const typingIndicator = document.createElement('div');
+            typingIndicator.className = 'typing-indicator';
+            typingIndicator.textContent = 'Typing...';
+            typingIndicator.id = 'typing-indicator';
+            document.getElementById('messages').appendChild(typingIndicator);
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+            
+            // Ensure properties are loaded
+            if (!propertiesLoaded) {
+                await loadProperties();
+            }
+            
+            // Get response (using Hugging Face API or fallback)
+            try {
+                // Try to call Hugging Face API with timeout for better reliability
+                const apiPromise = callHuggingFaceAPI(userMessage);
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error("API call timed out")), 30000)
+                );
+                
+                const aiResponse = await Promise.race([apiPromise, timeoutPromise]);
+                
+                if (document.getElementById('typing-indicator')) {
+                    document.getElementById('typing-indicator').remove();
+                }
+                addMessage(aiResponse, 'bot');
+                
+                // Add to conversation history
+                conversationHistory.push({role: "assistant", content: aiResponse});
+            } catch (error) {
+                // Fallback to local response if API fails
+                console.error("Error calling AI:", error);
+                if (document.getElementById('typing-indicator')) {
+                    document.getElementById('typing-indicator').remove();
+                }
+                const fallbackResponse = generateLocalResponse(userMessage);
+                addMessage(fallbackResponse, 'bot');
+                
+                // Add to conversation history
+                conversationHistory.push({role: "assistant", content: fallbackResponse});
             }
         }
     </script>
