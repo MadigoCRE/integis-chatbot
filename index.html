@@ -263,6 +263,11 @@
             }
         }
 
+        // Helper function to determine if input is Czech
+        function isCzech(text) {
+            return /[áčďéěíňóřšťúůýž]/i.test(text);
+        }
+
         // Function to load properties from JSON file
         async function loadProperties() {
             try {
@@ -337,52 +342,30 @@
         });
 
         // Send button click event
-        document.getElementById('send-button').addEventListener('click', sendMessage);
+        document.getElementById('send-button').addEventListener('click', function() {
+            const input = document.getElementById('user-input').value.trim().toLowerCase();
+            
+            if (input === "!test api") {
+                document.getElementById('user-input').value = '';
+                testGeminiAPI();
+                return; // Add return statement to prevent normal message processing
+            } else {
+                sendMessage();
+            }
+        });
 
-// Enter key press event 
-document.getElementById('user-input').addEventListener('keypress', function(e) {
-    if (e.key === 'Enter') {
-        const input = document.getElementById('user-input').value.trim().toLowerCase();
-        if (input === "!test api") {
-            e.preventDefault(); // Prevent default to ensure no other handlers run
-            document.getElementById('user-input').value = '';
-            testGeminiAPI();
-        } else {
-            sendMessage();
-        }
-    }
-});
-
-// Update your sendMessage function to add a check at the very beginning
-async function sendMessage() {
-    const userInput = document.getElementById('user-input');
-    const inputText = userInput.value.trim();
-    
-    // First check for command - this should be the first thing we do
-    if (inputText.toLowerCase() === "!test api") {
-        userInput.value = '';
-        testGeminiAPI();
-        return;
-    }
-    
-    if (!inputText) return;
-    
-    // Rest of your sendMessage function...
-    debugLog("User input:", inputText);
-    // ...
-}
-
-// Replace the send button click handler completely
-document.getElementById('send-button').onclick = function() {
-    const input = document.getElementById('user-input').value.trim().toLowerCase();
-    
-    if (input === "!test api") {
-        document.getElementById('user-input').value = '';
-        testGeminiAPI();
-    } else {
-        sendMessage();
-    }
-};
+        // Enter key press event
+        document.getElementById('user-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                const input = document.getElementById('user-input').value.trim().toLowerCase();
+                if (input === "!test api") {
+                    document.getElementById('user-input').value = '';
+                    testGeminiAPI();
+                    return; // Add return statement to prevent normal message processing
+                }
+                sendMessage();
+            }
+        });
 
         // Improved follow-up detection
         function isFollowUpQuestion(userInput) {
@@ -460,6 +443,17 @@ document.getElementById('send-button').onclick = function() {
                 criteria.type = "retail";
             } else if (/industrial|průmysl|sklad/i.test(userInput)) {
                 criteria.type = "industrial";
+            }
+            
+            // NEW: Check for people-based sizing
+            const peopleMatch = userInput.match(/(\d+)\s*(?:people|persons|employees|staff|workers|colleagues|team members|osoby|lidí|zaměstnanců|pracovníků)/i);
+            if (peopleMatch) {
+                const numberOfPeople = parseInt(peopleMatch[1]);
+                if (!isNaN(numberOfPeople)) {
+                    // Flag that this is a people-based query that needs Gemini processing
+                    criteria.peopleCount = numberOfPeople;
+                    debugLog(`Detected people-based query: ${numberOfPeople} people`);
+                }
             }
             
             // Extract size "between X and Y" pattern
@@ -807,6 +801,59 @@ document.getElementById('send-button').onclick = function() {
             return results;
         }
 
+        // Helper function to generate property listing HTML
+        function generatePropertyListingHTML(properties, offset = 0, limit = 5) {
+            let html = "";
+            
+            // Get the relevant slice for pagination
+            const propertiesToShow = properties.slice(offset, offset + limit);
+            
+            // Format property items
+            propertiesToShow.forEach(property => {
+                let propertyDetails = `<div class="property-item">
+                    <div class="property-name">${property.name}</div>`;
+                
+                propertyDetails += `<div class="property-details">`;
+                
+                if (property.size) {
+                    propertyDetails += `<span class="property-detail">${property.size} sqm</span>`;
+                }
+                
+                if (property.type) {
+                    propertyDetails += `<span class="property-detail">${property.type}</span>`;
+                }
+                
+                if (property.price) {
+                    propertyDetails += `<span class="property-detail">${property.price}</span>`;
+                }
+                
+                if (property.floor) {
+                    propertyDetails += `<span class="property-detail">${property.floor}</span>`;
+                }
+                
+                // Use location if available, otherwise fallback to city and district
+                if (property.location) {
+                    propertyDetails += `<span class="property-detail">${property.location}</span>`;
+                } else if (property.city) {
+                    let locationText = property.city;
+                    if (property.district) {
+                        locationText += ` - ${property.district}`;
+                    }
+                    propertyDetails += `<span class="property-detail">${locationText}</span>`;
+                }
+                
+                if (property.available) {
+                    propertyDetails += `<span class="property-detail">Available: ${property.available}</span>`;
+                }
+                
+                propertyDetails += `</div></div>`;
+                
+                html += propertyDetails;
+            });
+            
+            return html;
+        }
+
         // Updated local response generator with improved criteria handling
         function generateLocalResponse(userInput) {
             debugLog("Generating local response for:", userInput);
@@ -822,8 +869,8 @@ document.getElementById('send-button').onclick = function() {
             }
             
             // Determine language for response (simple heuristic)
-            const isCzech = /[áčďéěíňóřšťúůýž]/i.test(userInput);
-            debugLog("Language detection - isCzech:", isCzech);
+            const isCzechQuery = isCzech(userInput);
+            debugLog("Language detection - isCzech:", isCzechQuery);
             
             // Check if this is a follow-up question
             const isFollowUp = isFollowUpQuestion(userInput);
@@ -894,31 +941,31 @@ document.getElementById('send-button').onclick = function() {
                 let response = "";
                 
                 if (isFollowUp && /more|další|show more|ukázat více/i.test(userInput) && conversationState.offset > 0) {
-                    response = isCzech 
+                    response = isCzechQuery 
                         ? `Ano, zde jsou další nemovitosti, které splňují vaše kritéria:<br><br>`
                         : `Yes, here are more properties that match your criteria:<br><br>`;
                 } else if (isFollowUp) {
                     if (criteria.location && criteria.type) {
                         if (criteria.minSize && criteria.maxSize) {
-                            response = isCzech 
+                            response = isCzechQuery 
                                 ? `Našel jsem tyto ${criteria.type} prostory v lokalitě ${criteria.location} o velikosti mezi ${criteria.minSize} a ${criteria.maxSize} m²:<br><br>`
                                 : `I found these ${criteria.type} spaces in ${criteria.location} with a size between ${criteria.minSize} and ${criteria.maxSize} sqm:<br><br>`;
                         } else if (criteria.size) {
-                            response = isCzech 
+                            response = isCzechQuery 
                                 ? `Našel jsem tyto ${criteria.type} prostory v lokalitě ${criteria.location} o velikosti kolem ${criteria.size} m²:<br><br>`
                                 : `I found these ${criteria.type} spaces in ${criteria.location} with a size around ${criteria.size} sqm:<br><br>`;
                         } else {
-                            response = isCzech 
+                            response = isCzechQuery 
                                 ? `Našel jsem tyto ${criteria.type} prostory v lokalitě ${criteria.location}:<br><br>`
                                 : `I found these ${criteria.type} spaces in ${criteria.location}:<br><br>`;
                         }
                     } else {
-                        response = isCzech 
+                        response = isCzechQuery 
                             ? `Na základě upřesněných kritérií jsem našel tyto nemovitosti:<br><br>`
                             : `Based on your refined criteria, I found these properties:<br><br>`;
                     }
                 } else {
-                    response = isCzech 
+                    response = isCzechQuery 
                         ? `Na základě vašeho dotazu jsem našel tyto nemovitosti, které by vás mohly zajímat:<br><br>`
                         : `Based on your query, I found these properties that might interest you:<br><br>`;
                 }
@@ -935,70 +982,30 @@ document.getElementById('send-button').onclick = function() {
                     conversationState.offset = 0;
                     const propertiesToShow = matchedProperties.slice(0, 5);
                     
-                    response = isCzech 
+                    response = isCzechQuery 
                         ? `Došli jsme na konec výsledků. Zde jsou znovu první nemovitosti:<br><br>`
                         : `We've reached the end of the results. Here are the first properties again:<br><br>`;
                         
                     conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
                 }
                 
-                // Format property items
-                propertiesToShow.forEach(property => {
-                    let propertyDetails = `<div class="property-item">
-                        <div class="property-name">${property.name}</div>`;
-                    
-                    propertyDetails += `<div class="property-details">`;
-                    
-                    if (property.size) {
-                        propertyDetails += `<span class="property-detail">${property.size} sqm</span>`;
-                    }
-                    
-                    if (property.type) {
-                        propertyDetails += `<span class="property-detail">${property.type}</span>`;
-                    }
-                    
-                    if (property.price) {
-                        propertyDetails += `<span class="property-detail">${property.price}</span>`;
-                    }
-                    
-                    if (property.floor) {
-                        propertyDetails += `<span class="property-detail">${property.floor}</span>`;
-                    }
-                    
-                    // Use location if available, otherwise fallback to city and district
-                    if (property.location) {
-                        propertyDetails += `<span class="property-detail">${property.location}</span>`;
-                    } else if (property.city) {
-                        let locationText = property.city;
-                        if (property.district) {
-                            locationText += ` - ${property.district}`;
-                        }
-                        propertyDetails += `<span class="property-detail">${locationText}</span>`;
-                    }
-                    
-                    if (property.available) {
-                        propertyDetails += `<span class="property-detail">Available: ${property.available}</span>`;
-                    }
-                    
-                    propertyDetails += `</div></div>`;
-                    
-                    response += propertyDetails;
-                });
+                // Add property listings HTML
+                response += generatePropertyListingHTML(matchedProperties, conversationState.offset, 5);
                 
                 // Add pagination information
                 const remainingCount = matchedProperties.length - (conversationState.offset + propertiesToShow.length);
                 if (remainingCount > 0) {
-                    response += isCzech
+                    response += isCzechQuery
                         ? `<br>Zobrazuji ${conversationState.offset + 1}-${conversationState.offset + propertiesToShow.length} z ${matchedProperties.length} nalezených nemovitostí. Napište "více" pro zobrazení dalších.`
                         : `<br>Showing ${conversationState.offset + 1}-${conversationState.offset + propertiesToShow.length} of ${matchedProperties.length} matching properties. Type "more" to see more.`;
                 } else {
-                    response += isCzech
+                    response += isCzechQuery
                         ? `<br>Zobrazuji ${propertiesToShow.length} z ${matchedProperties.length} nalezených nemovitostí.`
                         : `<br>Showing ${propertiesToShow.length} of ${matchedProperties.length} matching properties.`;
                 }
                 
                 // Add follow-up prompt
-                response += isCzech
+                response += isCzechQuery
                     ? `<br><br>Přejete si více informací o některé z těchto nemovitostí nebo chcete upřesnit vyhledávání?`
                     : `<br><br>Would you like more details about any of these properties or would you like to refine your search?`;
                     
@@ -1009,7 +1016,7 @@ document.getElementById('send-button').onclick = function() {
                 let noMatchResponse = "";
                 
                 if (isFollowUp) {
-                    noMatchResponse = isCzech
+                    noMatchResponse = isCzechQuery
                         ? `Bohužel jsem nenašel žádné nemovitosti, které by odpovídaly těmto upřesněným požadavkům. Možná zkuste jiné parametry?`
                         : `I couldn't find any properties matching these refined criteria. Perhaps try different parameters?`;
                         
@@ -1024,18 +1031,115 @@ document.getElementById('send-button').onclick = function() {
                         const sizeAlternatives = enhancedSearchProperties(withoutSizeSearch);
                         
                         if (sizeAlternatives.length > 0) {
-                            noMatchResponse += isCzech
+                            noMatchResponse += isCzechQuery
                                 ? `<br><br>Našel jsem však ${sizeAlternatives.length} ${criteria.type} nemovitostí v lokalitě ${criteria.location} bez omezení velikosti. Přejete si je zobrazit?`
                                 : `<br><br>However, I found ${sizeAlternatives.length} ${criteria.type} properties in ${criteria.location} without size restrictions. Would you like to see them?`;
                         }
                     }
                 } else {
-                    noMatchResponse = isCzech
+                    noMatchResponse = isCzechQuery
                         ? `Bohužel jsem nenašel přesné shody pro vaše kritéria z našich ${properties.length} nemovitostí. Můžete zkusit obecnější vyhledávání? Například se můžete zeptat na "kancelářské prostory v Praze" nebo "obchodní prostory kolem 800 sqm".`
                         : `I couldn't find exact matches for your criteria from our ${properties.length} properties. Could you try a more general search? For example, you can ask about "office space in Prague" or "retail space around 800 sqm".`;
                 }
                 
                 return noMatchResponse;
+            }
+        }
+
+        // New function to call Gemini API specifically for people to sqm conversion
+        async function callGeminiAPIForPeopleConversion(peopleCount, spaceType = "office") {
+            debugLog("Calling Gemini API to convert people count to sqm");
+            
+            try {
+                // Format the prompt for Gemini
+                const conversionPrompt = `
+                You are a commercial real estate expert. Convert number of people to square meters needed for ${spaceType} space.
+                Be realistic and follow these guidelines:
+                - For office space: typically 8-12 sqm per person for standard offices, 15-20 sqm for executive space
+                - For retail: depends on type but generally 15-40 sqm per staff member
+                - For industrial: typically 25-50 sqm per worker depending on operations
+                
+                For ${peopleCount} people in a ${spaceType} space, provide the minimum and maximum sqm required.
+                
+                Format your response EXACTLY as a JSON object with minSize and maxSize properties as numbers only:
+                {"minSize": X, "maxSize": Y}
+                
+                Do not include any explanation, ONLY return the JSON object.
+                `;
+                
+                // Call the Gemini API
+                const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        contents: [
+                            {
+                                role: "user",
+                                parts: [{ text: conversionPrompt }]
+                            }
+                        ],
+                        generationConfig: {
+                            temperature: 0.2,  // Lower temperature for more deterministic output
+                            maxOutputTokens: 100
+                        }
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`API error: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                // Extract the generated text
+                if (result.candidates && result.candidates.length > 0 && 
+                    result.candidates[0].content && result.candidates[0].content.parts && 
+                    result.candidates[0].content.parts.length > 0) {
+                    
+                    const generatedText = result.candidates[0].content.parts[0].text.trim();
+                    debugLog("Received conversion response:", generatedText);
+                    
+                    // Parse the JSON response
+                    try {
+                        const conversion = JSON.parse(generatedText);
+                        if (conversion.minSize && conversion.maxSize) {
+                            return {
+                                minSize: Math.round(conversion.minSize),
+                                maxSize: Math.round(conversion.maxSize)
+                            };
+                        }
+                    } catch (parseError) {
+                        debugLog("Error parsing conversion JSON:", parseError.message);
+                        // Try to extract numbers from the text if JSON parsing fails
+                        const numbers = generatedText.match(/\d+/g);
+                        if (numbers && numbers.length >= 2) {
+                            return {
+                                minSize: Math.round(parseInt(numbers[0])),
+                                maxSize: Math.round(parseInt(numbers[1]))
+                            };
+                        }
+                    }
+                }
+                
+                throw new Error("Could not extract size conversion from Gemini response");
+            } catch (error) {
+                debugLog("Error in people to sqm conversion:", error.message);
+                // Provide a fallback conversion based on standard metrics
+                const fallbackSizes = {
+                    "office": { min: Math.round(peopleCount * 8), max: Math.round(peopleCount * 12) },
+                    "retail": { min: Math.round(peopleCount * 15), max: Math.round(peopleCount * 40) },
+                    "industrial": { min: Math.round(peopleCount * 25), max: Math.round(peopleCount * 50) }
+                };
+                
+                const fallback = fallbackSizes[spaceType] || fallbackSizes.office;
+                debugLog("Using fallback conversion:", fallback);
+                
+                return {
+                    minSize: fallback.min,
+                    maxSize: fallback.max
+                };
             }
         }
 
@@ -1220,22 +1324,30 @@ ${propertiesText}`;
         // Improved sendMessage function
         async function sendMessage() {
             const userInput = document.getElementById('user-input');
-            if (!userInput.value.trim()) return;
+            const inputText = userInput.value.trim();
             
-            debugLog("User input:", userInput.value);
+            // First check for command - this should be the first thing we do
+            if (inputText.toLowerCase() === "!test api") {
+                userInput.value = '';
+                testGeminiAPI();
+                return;
+            }
+            
+            if (!inputText) return;
+            
+            debugLog("User input:", inputText);
             
             // Save to conversation state before clearing
-            conversationState.lastQuery = userInput.value;
+            conversationState.lastQuery = inputText;
             
             // Add user message
-            addMessage(userInput.value, 'user');
+            addMessage(inputText, 'user');
             
             // Add to conversation history
-            conversationHistory.push({role: "user", content: userInput.value});
+            conversationHistory.push({role: "user", content: inputText});
             debugLog("Updated conversation history:", conversationHistory.length + " messages");
             
-            // Clear input and store message
-            const userMessage = userInput.value;
+            // Clear input
             userInput.value = '';
             
             // Show typing indicator
@@ -1252,8 +1364,78 @@ ${propertiesText}`;
                 await loadProperties();
             }
 
+            // Extract criteria to check for people-based query
+            const criteria = extractSearchCriteria(inputText);
+            
+            // NEW: If this is a people-based query, use Gemini to convert people to sqm
+            if (criteria.peopleCount) {
+                try {
+                    debugLog("People-based query detected, using Gemini to convert to sqm");
+                    
+                    // Call Gemini API to convert people to sqm
+                    const conversionResponse = await callGeminiAPIForPeopleConversion(criteria.peopleCount, criteria.type || "office");
+                    
+                    // Update criteria with the sqm conversion
+                    if (conversionResponse.minSize && conversionResponse.maxSize) {
+                        debugLog(`Converted ${criteria.peopleCount} people to ${conversionResponse.minSize}-${conversionResponse.maxSize} sqm`);
+                        
+                        // Update criteria with the size range
+                        delete criteria.size; // Remove any size if present
+                        criteria.minSize = conversionResponse.minSize;
+                        criteria.maxSize = conversionResponse.maxSize;
+                        
+                        // Remove the peopleCount flag
+                        delete criteria.peopleCount;
+                        
+                        // Update conversation state
+                        conversationState.currentSearchCriteria = {...criteria};
+                        
+                        // Search with the updated criteria
+                        const matchedProperties = enhancedSearchProperties(criteria);
+                        
+                        if (matchedProperties.length > 0) {
+                            // Format the explanation
+                            const conversionExplanation = isCzech(inputText)
+                                ? `Pro ${criteria.peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². Našel jsem tyto možnosti:`
+                                : `For ${criteria.peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. Here are the options I found:`;
+                            
+                            // Generate property listings HTML
+                            const propertyListingsHTML = generatePropertyListingHTML(matchedProperties, conversationState.offset, 5);
+                            
+                            // Add pagination information
+                            const paginationHTML = isCzech(inputText)
+                                ? `<br>Zobrazuji 1-${Math.min(5, matchedProperties.length)} z ${matchedProperties.length} nalezených nemovitostí.${matchedProperties.length > 5 ? ' Napište "více" pro zobrazení dalších.' : ''}`
+                                : `<br>Showing 1-${Math.min(5, matchedProperties.length)} of ${matchedProperties.length} matching properties.${matchedProperties.length > 5 ? ' Type "more" to see more.' : ''}`;
+                            
+                            // Add follow-up prompt
+                            const followupHTML = isCzech(inputText)
+                                ? `<br><br>Přejete si více informací o některé z těchto nemovitostí nebo chcete upřesnit vyhledávání?`
+                                : `<br><br>Would you like more details about any of these properties or would you like to refine your search?`;
+                            
+                            // Combine everything
+                            const fullResponse = conversionExplanation + "<br><br>" + propertyListingsHTML + paginationHTML + followupHTML;
+                            
+                            // Display the response
+                            if (document.getElementById('typing-indicator')) {
+                                document.getElementById('typing-indicator').remove();
+                            }
+                            
+                            // Update last shown properties
+                            conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
+                            
+                            addMessage(fullResponse, 'bot');
+                            conversationHistory.push({role: "assistant", content: fullResponse});
+                            return;
+                        }
+                    }
+                } catch (error) {
+                    debugLog("Error processing people-based query:", error.message);
+                    // Continue with normal flow if there's an error
+                }
+            }
+
             // STRATEGY: First generate a local response that we can fall back to
-            const fallbackResponse = generateLocalResponse(userMessage);
+            const fallbackResponse = generateLocalResponse(inputText);
             debugLog("Generated fallback response");
             
             // If our fallback found property matches, prioritize it for instant response
@@ -1279,7 +1461,7 @@ ${propertiesText}`;
             try {
                 debugLog("Attempting to use Gemini API");
                 // Try to call Gemini API with timeout
-                const apiPromise = callGeminiAPI(userMessage);
+                const apiPromise = callGeminiAPI(inputText);
                 const timeoutPromise = new Promise((_, reject) => 
                     setTimeout(() => {
                         debugLog("API call timed out after 20 seconds");
@@ -1318,105 +1500,105 @@ ${propertiesText}`;
             }
         }
 
-// Special debugging function for API testing
-function testGeminiAPI() {
-    // Important: Don't add to conversation history
-    debugLog("Testing Gemini API connection as a special command");
-    
-    // Clear any existing typing indicators
-    if (document.getElementById('typing-indicator')) {
-        document.getElementById('typing-indicator').remove();
-    }
-    
-    // Add a message to the chat about the test
-    const testMessage = addMessage("Testing Gemini API connection...", 'bot');
-    
-    // Show typing indicator
-    const typingIndicator = document.createElement('div');
-    typingIndicator.className = 'typing-indicator';
-    typingIndicator.textContent = 'Testing API...';
-    typingIndicator.id = 'typing-indicator';
-    document.getElementById('messages').appendChild(typingIndicator);
-    
-    // Try a simple call to the Gemini model
-    fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            contents: [
-                {
-                    role: "user",
-                    parts: [{ text: "Hello, this is a test." }]
-                }
-            ],
-            generationConfig: {
-                temperature: 0.7,
-                maxOutputTokens: 100
+        // Special debugging function for API testing
+        function testGeminiAPI() {
+            // Important: Don't add to conversation history
+            debugLog("Testing Gemini API connection as a special command");
+            
+            // Clear any existing typing indicators
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
             }
-        })
-    })
-    .then(response => {
-        debugLog("API test response status:", response.status);
-        return response.text().then(text => {
-            return { status: response.status, text: text };
-        });
-    })
-    .then(({ status, text }) => {
-        debugLog("API test response:", text);
-        
-        let testResult = "";
-        
-        try {
-            if (status >= 200 && status < 300) {
-                const jsonResponse = JSON.parse(text);
-                testResult = "✅ Gemini API is accessible and responded successfully!";
+            
+            // Add a message to the chat about the test
+            const testMessage = addMessage("Testing Gemini API connection...", 'bot');
+            
+            // Show typing indicator
+            const typingIndicator = document.createElement('div');
+            typingIndicator.className = 'typing-indicator';
+            typingIndicator.textContent = 'Testing API...';
+            typingIndicator.id = 'typing-indicator';
+            document.getElementById('messages').appendChild(typingIndicator);
+            
+            // Try a simple call to the Gemini model
+            fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [{ text: "Hello, this is a test." }]
+                        }
+                    ],
+                    generationConfig: {
+                        temperature: 0.7,
+                        maxOutputTokens: 100
+                    }
+                })
+            })
+            .then(response => {
+                debugLog("API test response status:", response.status);
+                return response.text().then(text => {
+                    return { status: response.status, text: text };
+                });
+            })
+            .then(({ status, text }) => {
+                debugLog("API test response:", text);
                 
-                if (jsonResponse.candidates && jsonResponse.candidates.length > 0 && 
-                    jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts && 
-                    jsonResponse.candidates[0].content.parts.length > 0) {
-                    const modelResponse = jsonResponse.candidates[0].content.parts[0].text;
-                    testResult += `<br><br>Model response: "${modelResponse.substring(0, 100)}${modelResponse.length > 100 ? '...' : ''}"`;
+                let testResult = "";
+                
+                try {
+                    if (status >= 200 && status < 300) {
+                        const jsonResponse = JSON.parse(text);
+                        testResult = "✅ Gemini API is accessible and responded successfully!";
+                        
+                        if (jsonResponse.candidates && jsonResponse.candidates.length > 0 && 
+                            jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts && 
+                            jsonResponse.candidates[0].content.parts.length > 0) {
+                            const modelResponse = jsonResponse.candidates[0].content.parts[0].text;
+                            testResult += `<br><br>Model response: "${modelResponse.substring(0, 100)}${modelResponse.length > 100 ? '...' : ''}"`;
+                        }
+                    } else {
+                        if (text.includes("API key not valid")) {
+                            testResult = "❌ Authentication failed. Your API key may be invalid or expired.";
+                        } else if (status === 403) {
+                            testResult = "❌ Access denied to Gemini API (403). Check your API key permissions.";
+                        } else if (status === 404) {
+                            testResult = "❌ Gemini API endpoint not found (404). The API URL may be incorrect.";
+                        } else {
+                            testResult = `❌ Error accessing Gemini API: ${text}`;
+                        }
+                    }
+                } catch (error) {
+                    testResult = `❌ Error parsing API response: ${error.message}<br><br>Raw response (status ${status}): ${text}`;
                 }
-            } else {
-                if (text.includes("API key not valid")) {
-                    testResult = "❌ Authentication failed. Your API key may be invalid or expired.";
-                } else if (status === 403) {
-                    testResult = "❌ Access denied to Gemini API (403). Check your API key permissions.";
-                } else if (status === 404) {
-                    testResult = "❌ Gemini API endpoint not found (404). The API URL may be incorrect.";
-                } else {
-                    testResult = `❌ Error accessing Gemini API: ${text}`;
+                
+                return testResult;
+            })
+            .then(finalResult => {
+                // Remove typing indicator
+                if (document.getElementById('typing-indicator')) {
+                    document.getElementById('typing-indicator').remove();
                 }
-            }
-        } catch (error) {
-            testResult = `❌ Error parsing API response: ${error.message}<br><br>Raw response (status ${status}): ${text}`;
+                
+                // Display the test result
+                addMessage(`<strong>Gemini API Test Results:</strong><br><br>${finalResult}`, 'bot');
+            })
+            .catch(error => {
+                debugLog("API test error:", error);
+                
+                // Remove typing indicator
+                if (document.getElementById('typing-indicator')) {
+                    document.getElementById('typing-indicator').remove();
+                }
+                
+                // Display error message
+                addMessage(`<strong>API Test Failed:</strong><br><br>❌ ${error.message}`, 'bot');
+            });
         }
-        
-        return testResult;
-    })
-    .then(finalResult => {
-        // Remove typing indicator
-        if (document.getElementById('typing-indicator')) {
-            document.getElementById('typing-indicator').remove();
-        }
-        
-        // Display the test result
-        addMessage(`<strong>Gemini API Test Results:</strong><br><br>${finalResult}`, 'bot');
-    })
-    .catch(error => {
-        debugLog("API test error:", error);
-        
-        // Remove typing indicator
-        if (document.getElementById('typing-indicator')) {
-            document.getElementById('typing-indicator').remove();
-        }
-        
-        // Display error message
-        addMessage(`<strong>API Test Failed:</strong><br><br>❌ ${error.message}`, 'bot');
-    });
-}
 
         // Add listener for debug command
         document.getElementById('user-input').addEventListener('input', function(e) {
@@ -1426,19 +1608,6 @@ function testGeminiAPI() {
                 e.target.style.backgroundColor = "";
             }
         });
-
-        // Override send button for debug command
-        document.getElementById('send-button').onclick = function() {
-            const input = document.getElementById('user-input').value.trim().toLowerCase();
-            
-            if (input === "!test api") {
-                document.getElementById('user-input').value = '';
-                testGeminiAPI();
-                return; // Add return statement to prevent normal message processing
-            } else {
-                sendMessage();
-            }
-        };
     </script>
 </body>
 </html>
