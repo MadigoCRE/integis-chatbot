@@ -226,9 +226,10 @@
             lastResponse: ""
         };
 
-        // Hugging Face configuration - Updated with correct model ID
-        const HUGGING_FACE_TOKEN = "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";
-        const MODEL_ID = "meta-llama/Llama-2-7b-chat-hf"; // Model ID
+        // Gemini API Configuration
+        const GEMINI_API_KEY = "AIzaSyBu8k9YArazXs1MXrKzxctJiYz85LMD850";
+        const GEMINI_MODEL = "gemini-2.0-flash";
+        const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
         // Debug logger function
         function debugLog(message, obj = null) {
@@ -1000,9 +1001,9 @@
             }
         }
 
-        // Updated Hugging Face API call with proper context
-        async function callHuggingFaceAPI(userInput) {
-            debugLog("Starting Hugging Face API call for input:", userInput);
+        // Call the Gemini API
+        async function callGeminiAPI(userInput) {
+            debugLog("Starting Gemini API call for input:", userInput);
             
             // Check if properties are loaded
             if (!propertiesLoaded || properties.length === 0) {
@@ -1036,20 +1037,25 @@
                 propertiesText += detailsText;
             });
 
-            // Format conversation history in the format expected by Llama-2-7b-chat-hf
-            const formattedConversation = [];
-            
-            // Add system message with context preservation hints
-            const systemMessage = {
-                role: "system",
-                content: `You are a professional commercial real estate assistant for Integis. Your job is to help clients find the perfect office, retail, or industrial space based on their needs. Be concise, professional, and helpful.
+            // Previous conversation messages for context
+            const previousMessages = [];
+            for (let i = 0; i < conversationHistory.length; i++) {
+                const message = conversationHistory[i];
+                previousMessages.push({
+                    role: message.role,
+                    parts: [{ text: message.content }]
+                });
+            }
+
+            // Create the system prompt
+            const systemPrompt = `You are a professional commercial real estate assistant for Integis. Your job is to help clients find the perfect office, retail, or industrial space based on their needs. Be concise, professional, and helpful.
 
 IMPORTANT INSTRUCTIONS:
 1. ALWAYS maintain conversation context throughout the entire chat session
 2. Remember previous searches and parameters
 3. When user asks follow-up questions, add to their previous search criteria instead of replacing it
 4. If they ask for "offices in Ostrava under 100 sqm" and then later ask "what about in Prague?", keep the type (office) and size (under 100 sqm) but change the location
-5. When presenting properties, format them in an easy-to-read way
+5. When presenting properties, format them in an easy-to-read way with HTML (use <div>, <span> tags with appropriate classes)
 6. If you don't have information, be honest and offer to help in other ways
 7. Always respond in the same language as the user (Czech or English)
 
@@ -1058,143 +1064,87 @@ Current Search Criteria: ${JSON.stringify(conversationState.currentSearchCriteri
 Last Shown Properties: ${JSON.stringify(conversationState.lastShownProperties || [])}
 
 AVAILABLE PROPERTIES:
-${propertiesText}`
-            };
-            
-            formattedConversation.push(systemMessage);
-            
-            // Add past conversation messages (excluding the welcome message)
-            // Make sure we add ALL relevant conversations for context
-            for (let i = 1; i < conversationHistory.length; i++) {
-                const message = conversationHistory[i];
-                formattedConversation.push({
-                    role: message.role === "user" ? "user" : "assistant",
-                    content: message.content
-                });
-            }
-            
-            // Add the current user input
-            formattedConversation.push({
-                role: "user",
-                content: userInput
-            });
-            
-            debugLog("Prepared conversation messages for API:", formattedConversation.length + " messages");
-            
+${propertiesText}`;
+
             try {
-                // Try public model first (GPT-2) as fallback
-                const publicModelId = "gpt2";
-                debugLog("First trying public model:", publicModelId);
-                
-                let response = await fetch(`https://api-inference.huggingface.co/models/${publicModelId}`, {
+                // Format the request for Gemini API
+                const requestData = {
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [{ text: systemPrompt }]
+                        },
+                        {
+                            role: "model",
+                            parts: [{ text: "I understand. I am a professional commercial real estate assistant for Integis. I'll help clients find properties based on their needs while maintaining conversation context and following all your instructions." }]
+                        },
+                        {
+                            role: "user",
+                            parts: [{ text: userInput }]
+                        }
+                    ],
+                    generationConfig: {
+                        temperature: 0.7,
+                        topK: 40,
+                        topP: 0.95,
+                        maxOutputTokens: 800,
+                    }
+                };
+
+                // Add previous conversation messages if available
+                if (previousMessages.length > 1) { // Skip welcome message
+                    requestData.contents = [
+                        {
+                            role: "user",
+                            parts: [{ text: systemPrompt }]
+                        },
+                        {
+                            role: "model",
+                            parts: [{ text: "I understand. I am a professional commercial real estate assistant for Integis. I'll help clients find properties based on their needs while maintaining conversation context and following all your instructions." }]
+                        },
+                        ...previousMessages.slice(1), // Add all previous messages except welcome
+                        {
+                            role: "user",
+                            parts: [{ text: userInput }]
+                        }
+                    ];
+                }
+
+                // Call the Gemini API
+                debugLog("Sending API request to Gemini API");
+                const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${HUGGING_FACE_TOKEN}`,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        inputs: userInput,
-                        parameters: {
-                            max_length: 100,
-                            temperature: 0.7,
-                            return_full_text: false
-                        }
-                    })
+                    body: JSON.stringify(requestData)
                 });
-                
-                debugLog("GPT-2 API Response Status:", response.status);
-                
-                if (response.ok) {
-                    debugLog("Public model responded. Now trying Llama model...");
-                    
-                    // Now try the Llama model if the public model works
-                    debugLog("Sending API request to Llama model:", `https://api-inference.huggingface.co/models/${MODEL_ID}`);
-                    
-                    response = await fetch(`https://api-inference.huggingface.co/models/${MODEL_ID}`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${HUGGING_FACE_TOKEN}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            inputs: {
-                                text: `<s>[INST] ${systemMessage.content}\n\nCurrent User Question: ${userInput} [/INST]`
-                            },
-                            parameters: {
-                                max_new_tokens: 400,
-                                temperature: 0.7,
-                                top_p: 0.95,
-                                do_sample: true,
-                                return_full_text: false
-                            }
-                        })
-                    });
-                    
-                    debugLog("Llama API Response Status:", response.status);
-                } else {
-                    debugLog("Public model failed, API token may be invalid");
+
+                debugLog("Gemini API Response Status:", response.status);
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    debugLog("Gemini API Error:", errorText);
+                    throw new Error(`API error: ${response.status} - ${errorText}`);
                 }
-                
-                // Get response text for logging
-                const responseText = await response.text();
-                debugLog("API Response Text (first 100 chars):", responseText.substring(0, 100) + "...");
-                
-                // Parse the response
-                let result;
-                try {
-                    result = JSON.parse(responseText);
-                    debugLog("Parsed API response successfully");
-                } catch (parseError) {
-                    debugLog("Error parsing API response:", parseError.message);
+
+                const result = await response.json();
+                debugLog("Gemini API result structure:", Object.keys(result));
+
+                // Extract the generated text
+                if (result && result.candidates && result.candidates.length > 0 && 
+                    result.candidates[0].content && result.candidates[0].content.parts && 
+                    result.candidates[0].content.parts.length > 0) {
                     
-                    if (responseText.includes("loading") || responseText.includes("queue")) {
-                        debugLog("Model is loading or in queue");
-                        return "I'm still warming up. Please try again in a few moments.";
-                    }
-                    
-                    if (responseText.includes("error")) {
-                        debugLog("API returned an error message:", responseText);
-                        if (responseText.includes("token") || responseText.includes("authorization")) {
-                            return "I'm having trouble connecting to my language model. There may be an issue with API authentication. Falling back to local processing.";
-                        }
-                        return "I encountered an error connecting to my language model. Please try again.";
-                    }
-                    
-                    return "I encountered an error processing the response from my language model. Please try again.";
-                }
-                
-                // Check for errors
-                if (result && result.error) {
-                    debugLog("API returned error in JSON format:", result.error);
-                    
-                    if (result.error.includes("loading") || result.error.includes("queue")) {
-                        return "I'm still warming up. Please try again in a few moments.";
-                    }
-                    
-                    throw new Error(result.error);
-                }
-                
-                // Extract the generated text - format depends on the API response structure
-                if (result && Array.isArray(result) && result[0] && result[0].generated_text) {
-                    // First response format possibility
-                    const generatedText = result[0].generated_text;
+                    const generatedText = result.candidates[0].content.parts[0].text;
                     debugLog("Successfully received generated text (first 100 chars):", generatedText.substring(0, 100) + "...");
                     return generatedText;
-                } else if (result && result.generated_text) {
-                    // Second response format possibility 
-                    debugLog("Successfully received generated text (first 100 chars):", result.generated_text.substring(0, 100) + "...");
-                    return result.generated_text;
-                } else if (result && result.choices && result.choices[0] && result.choices[0].message) {
-                    // Third response format possibility (more like OpenAI format)
-                    debugLog("Successfully received message content (first 100 chars):", result.choices[0].message.content.substring(0, 100) + "...");
-                    return result.choices[0].message.content;
                 } else {
-                    // If we can't figure out the format, dump the result for debugging
                     debugLog("Unexpected API response format:", result);
                     return "I received an unexpected response format. Please try again.";
                 }
             } catch (error) {
-                debugLog("Error calling Hugging Face API:", error.message);
+                debugLog("Error calling Gemini API:", error.message);
                 
                 if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
                     return "I'm having trouble connecting to my language model service. This might be due to network issues or service availability. Please try again later.";
@@ -1287,11 +1237,11 @@ ${propertiesText}`
                 return;
             }
             
-            // If fallback didn't find properties, try Hugging Face API
+            // If fallback didn't find properties, try Gemini API
             try {
-                debugLog("Attempting to use Hugging Face API");
-                // Try to call Hugging Face API with timeout
-                const apiPromise = callHuggingFaceAPI(userMessage);
+                debugLog("Attempting to use Gemini API");
+                // Try to call Gemini API with timeout
+                const apiPromise = callGeminiAPI(userMessage);
                 const timeoutPromise = new Promise((_, reject) => 
                     setTimeout(() => {
                         debugLog("API call timed out after 20 seconds");
@@ -1331,11 +1281,11 @@ ${propertiesText}`
         }
 
         // Special debugging function for API testing
-        function testHuggingFaceAPI() {
-            debugLog("Testing Hugging Face API connection");
+        function testGeminiAPI() {
+            debugLog("Testing Gemini API connection");
             
             // Add a message to the chat about the test
-            addMessage("Testing Hugging Face API connection...", 'user');
+            addMessage("Testing Gemini API connection...", 'user');
             
             // Show typing indicator
             const typingIndicator = document.createElement('div');
@@ -1344,82 +1294,63 @@ ${propertiesText}`
             typingIndicator.id = 'typing-indicator';
             document.getElementById('messages').appendChild(typingIndicator);
             
-            // Try a simple call to the public model first
-            fetch(`https://api-inference.huggingface.co/models/gpt2`, {
+            // Try a simple call to the Gemini model
+            fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
                 method: 'POST',
                 headers: {
-                    'Authorization': `Bearer ${HUGGING_FACE_TOKEN}`,
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    inputs: "Hello, this is a test.",
-                    parameters: {
-                        max_length: 30,
-                        temperature: 0.7
+                    contents: [
+                        {
+                            role: "user",
+                            parts: [{ text: "Hello, this is a test." }]
+                        }
+                    ],
+                    generationConfig: {
+                        temperature: 0.7,
+                        maxOutputTokens: 100
                     }
                 })
             })
             .then(response => {
                 debugLog("API test response status:", response.status);
-                return response.text();
+                return response.text().then(text => {
+                    return { status: response.status, text: text };
+                });
             })
-            .then(text => {
+            .then(({ status, text }) => {
                 debugLog("API test response:", text);
                 
                 let testResult = "";
                 
                 try {
-                    const jsonResponse = JSON.parse(text);
-                    testResult = "✅ Hugging Face API is accessible and responded successfully!";
-                    
-                    // Now try the Llama model
-                    return fetch(`https://api-inference.huggingface.co/models/${MODEL_ID}`, {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': `Bearer ${HUGGING_FACE_TOKEN}`,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            inputs: "Hello, this is a test.",
-                            parameters: {
-                                max_length: 30,
-                                temperature: 0.7
-                            }
-                        })
-                    })
-                    .then(llamaResponse => {
-                        debugLog("Llama API test response status:", llamaResponse.status);
-                        return llamaResponse.text().then(llamaText => {
-                            debugLog("Llama API test response:", llamaText);
-                            
-                            if (llamaResponse.ok) {
-                                testResult += "<br><br>✅ Llama model is accessible!";
-                            } else {
-                                if (llamaText.includes("loading") || llamaText.includes("queue")) {
-                                    testResult += "<br><br>⚠️ Llama model is still loading or in a queue. This is normal for the first request.";
-                                } else if (llamaResponse.status === 404) {
-                                    testResult += "<br><br>❌ Llama model not found (404). The model ID may be incorrect or you may not have access to it.";
-                                } else if (llamaResponse.status === 403) {
-                                    testResult += "<br><br>❌ Access denied to Llama model (403). You need to request access to this gated model on Hugging Face.";
-                                } else {
-                                    testResult += `<br><br>❌ Error accessing Llama model: ${llamaText}`;
-                                }
-                            }
-                            
-                            return testResult;
-                        });
-                    });
-                } catch (error) {
-                    if (text.includes("loading") || text.includes("queue")) {
-                        testResult = "⚠️ API is working, but model is still loading or in a queue. This is normal for the first request.";
-                    } else if (response.status === 401) {
-                        testResult = "❌ Authentication failed. Your API token may be invalid or expired.";
+                    if (status >= 200 && status < 300) {
+                        const jsonResponse = JSON.parse(text);
+                        testResult = "✅ Gemini API is accessible and responded successfully!";
+                        
+                        if (jsonResponse.candidates && jsonResponse.candidates.length > 0 && 
+                            jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts && 
+                            jsonResponse.candidates[0].content.parts.length > 0) {
+                            const modelResponse = jsonResponse.candidates[0].content.parts[0].text;
+                            testResult += `<br><br>Model response: "${modelResponse.substring(0, 100)}${modelResponse.length > 100 ? '...' : ''}"`;
+                        }
                     } else {
-                        testResult = `❌ Error parsing API response: ${error.message}<br><br>Raw response: ${text}`;
+                        if (text.includes("API key not valid")) {
+                            testResult = "❌ Authentication failed. Your API key may be invalid or expired.";
+                        } else if (status === 403) {
+                            testResult = "❌ Access denied to Gemini API (403). Check your API key permissions.";
+                        } else if (status === 404) {
+                            testResult = "❌ Gemini API endpoint not found (404). The API URL may be incorrect.";
+                        } else {
+                            testResult = `❌ Error accessing Gemini API: ${text}`;
+                        }
                     }
-                    
-                    return testResult;
+                } catch (error) {
+                    testResult = `❌ Error parsing API response: ${error.message}<br><br>Raw response (status ${status}): ${text}`;
                 }
+                
+                return testResult;
             })
             .then(finalResult => {
                 // Remove typing indicator
@@ -1428,7 +1359,7 @@ ${propertiesText}`
                 }
                 
                 // Display the test result
-                addMessage(`<strong>Hugging Face API Test Results:</strong><br><br>${finalResult}`, 'bot');
+                addMessage(`<strong>Gemini API Test Results:</strong><br><br>${finalResult}`, 'bot');
             })
             .catch(error => {
                 debugLog("API test error:", error);
@@ -1459,7 +1390,7 @@ ${propertiesText}`
             
             if (input === "!test api") {
                 document.getElementById('user-input').value = '';
-                testHuggingFaceAPI();
+                testGeminiAPI();
             } else {
                 sendMessage();
             }
