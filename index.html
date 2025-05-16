@@ -339,18 +339,50 @@
         // Send button click event
         document.getElementById('send-button').addEventListener('click', sendMessage);
 
-        // Enter key press event
-        document.getElementById('user-input').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                const input = document.getElementById('user-input').value.trim().toLowerCase();
-                if (input === "!test api") {
-                    document.getElementById('user-input').value = '';
-                    testGeminiAPI();
-                    return; // Add return statement to prevent normal message processing
-                }
-                sendMessage();
-            }
-        });
+// Enter key press event 
+document.getElementById('user-input').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+        const input = document.getElementById('user-input').value.trim().toLowerCase();
+        if (input === "!test api") {
+            e.preventDefault(); // Prevent default to ensure no other handlers run
+            document.getElementById('user-input').value = '';
+            testGeminiAPI();
+        } else {
+            sendMessage();
+        }
+    }
+});
+
+// Update your sendMessage function to add a check at the very beginning
+async function sendMessage() {
+    const userInput = document.getElementById('user-input');
+    const inputText = userInput.value.trim();
+    
+    // First check for command - this should be the first thing we do
+    if (inputText.toLowerCase() === "!test api") {
+        userInput.value = '';
+        testGeminiAPI();
+        return;
+    }
+    
+    if (!inputText) return;
+    
+    // Rest of your sendMessage function...
+    debugLog("User input:", inputText);
+    // ...
+}
+
+// Replace the send button click handler completely
+document.getElementById('send-button').onclick = function() {
+    const input = document.getElementById('user-input').value.trim().toLowerCase();
+    
+    if (input === "!test api") {
+        document.getElementById('user-input').value = '';
+        testGeminiAPI();
+    } else {
+        sendMessage();
+    }
+};
 
         // Improved follow-up detection
         function isFollowUpQuestion(userInput) {
@@ -1286,99 +1318,105 @@ ${propertiesText}`;
             }
         }
 
-        // Special debugging function for API testing
-        function testGeminiAPI() {
-            debugLog("Testing Gemini API connection");
-            
-            // Add a message to the chat about the test
-            addMessage("Testing Gemini API connection...", 'user');
-            
-            // Show typing indicator
-            const typingIndicator = document.createElement('div');
-            typingIndicator.className = 'typing-indicator';
-            typingIndicator.textContent = 'Testing API...';
-            typingIndicator.id = 'typing-indicator';
-            document.getElementById('messages').appendChild(typingIndicator);
-            
-            // Try a simple call to the Gemini model
-            fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    contents: [
-                        {
-                            role: "user",
-                            parts: [{ text: "Hello, this is a test." }]
-                        }
-                    ],
-                    generationConfig: {
-                        temperature: 0.7,
-                        maxOutputTokens: 100
-                    }
-                })
-            })
-            .then(response => {
-                debugLog("API test response status:", response.status);
-                return response.text().then(text => {
-                    return { status: response.status, text: text };
-                });
-            })
-            .then(({ status, text }) => {
-                debugLog("API test response:", text);
-                
-                let testResult = "";
-                
-                try {
-                    if (status >= 200 && status < 300) {
-                        const jsonResponse = JSON.parse(text);
-                        testResult = "✅ Gemini API is accessible and responded successfully!";
-                        
-                        if (jsonResponse.candidates && jsonResponse.candidates.length > 0 && 
-                            jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts && 
-                            jsonResponse.candidates[0].content.parts.length > 0) {
-                            const modelResponse = jsonResponse.candidates[0].content.parts[0].text;
-                            testResult += `<br><br>Model response: "${modelResponse.substring(0, 100)}${modelResponse.length > 100 ? '...' : ''}"`;
-                        }
-                    } else {
-                        if (text.includes("API key not valid")) {
-                            testResult = "❌ Authentication failed. Your API key may be invalid or expired.";
-                        } else if (status === 403) {
-                            testResult = "❌ Access denied to Gemini API (403). Check your API key permissions.";
-                        } else if (status === 404) {
-                            testResult = "❌ Gemini API endpoint not found (404). The API URL may be incorrect.";
-                        } else {
-                            testResult = `❌ Error accessing Gemini API: ${text}`;
-                        }
-                    }
-                } catch (error) {
-                    testResult = `❌ Error parsing API response: ${error.message}<br><br>Raw response (status ${status}): ${text}`;
+// Special debugging function for API testing
+function testGeminiAPI() {
+    // Important: Don't add to conversation history
+    debugLog("Testing Gemini API connection as a special command");
+    
+    // Clear any existing typing indicators
+    if (document.getElementById('typing-indicator')) {
+        document.getElementById('typing-indicator').remove();
+    }
+    
+    // Add a message to the chat about the test
+    const testMessage = addMessage("Testing Gemini API connection...", 'bot');
+    
+    // Show typing indicator
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing-indicator';
+    typingIndicator.textContent = 'Testing API...';
+    typingIndicator.id = 'typing-indicator';
+    document.getElementById('messages').appendChild(typingIndicator);
+    
+    // Try a simple call to the Gemini model
+    fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            contents: [
+                {
+                    role: "user",
+                    parts: [{ text: "Hello, this is a test." }]
                 }
+            ],
+            generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 100
+            }
+        })
+    })
+    .then(response => {
+        debugLog("API test response status:", response.status);
+        return response.text().then(text => {
+            return { status: response.status, text: text };
+        });
+    })
+    .then(({ status, text }) => {
+        debugLog("API test response:", text);
+        
+        let testResult = "";
+        
+        try {
+            if (status >= 200 && status < 300) {
+                const jsonResponse = JSON.parse(text);
+                testResult = "✅ Gemini API is accessible and responded successfully!";
                 
-                return testResult;
-            })
-            .then(finalResult => {
-                // Remove typing indicator
-                if (document.getElementById('typing-indicator')) {
-                    document.getElementById('typing-indicator').remove();
+                if (jsonResponse.candidates && jsonResponse.candidates.length > 0 && 
+                    jsonResponse.candidates[0].content && jsonResponse.candidates[0].content.parts && 
+                    jsonResponse.candidates[0].content.parts.length > 0) {
+                    const modelResponse = jsonResponse.candidates[0].content.parts[0].text;
+                    testResult += `<br><br>Model response: "${modelResponse.substring(0, 100)}${modelResponse.length > 100 ? '...' : ''}"`;
                 }
-                
-                // Display the test result
-                addMessage(`<strong>Gemini API Test Results:</strong><br><br>${finalResult}`, 'bot');
-            })
-            .catch(error => {
-                debugLog("API test error:", error);
-                
-                // Remove typing indicator
-                if (document.getElementById('typing-indicator')) {
-                    document.getElementById('typing-indicator').remove();
+            } else {
+                if (text.includes("API key not valid")) {
+                    testResult = "❌ Authentication failed. Your API key may be invalid or expired.";
+                } else if (status === 403) {
+                    testResult = "❌ Access denied to Gemini API (403). Check your API key permissions.";
+                } else if (status === 404) {
+                    testResult = "❌ Gemini API endpoint not found (404). The API URL may be incorrect.";
+                } else {
+                    testResult = `❌ Error accessing Gemini API: ${text}`;
                 }
-                
-                // Display error message
-                addMessage(`<strong>API Test Failed:</strong><br><br>❌ ${error.message}`, 'bot');
-            });
+            }
+        } catch (error) {
+            testResult = `❌ Error parsing API response: ${error.message}<br><br>Raw response (status ${status}): ${text}`;
         }
+        
+        return testResult;
+    })
+    .then(finalResult => {
+        // Remove typing indicator
+        if (document.getElementById('typing-indicator')) {
+            document.getElementById('typing-indicator').remove();
+        }
+        
+        // Display the test result
+        addMessage(`<strong>Gemini API Test Results:</strong><br><br>${finalResult}`, 'bot');
+    })
+    .catch(error => {
+        debugLog("API test error:", error);
+        
+        // Remove typing indicator
+        if (document.getElementById('typing-indicator')) {
+            document.getElementById('typing-indicator').remove();
+        }
+        
+        // Display error message
+        addMessage(`<strong>API Test Failed:</strong><br><br>❌ ${error.message}`, 'bot');
+    });
+}
 
         // Add listener for debug command
         document.getElementById('user-input').addEventListener('input', function(e) {
