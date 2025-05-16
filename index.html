@@ -188,121 +188,6 @@
             z-index: 1000;
             display: none; /* Hidden by default, enable for debugging */
         }
-        
-        /* Suggestion Buttons */
-        .suggestion-buttons {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 12px;
-        }
-        
-        .suggestion-button {
-            background-color: #f0f7ff;
-            color: #0078d4;
-            border: 1px solid #0078d4;
-            border-radius: 16px;
-            padding: 6px 12px;
-            font-size: 13px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        
-        .suggestion-button:hover {
-            background-color: #0078d4;
-            color: white;
-        }
-        
-        /* Refinement Buttons */
-        .refinement-buttons {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin: 12px 0;
-        }
-        
-        .refinement-button {
-            background-color: #f5f5f5;
-            color: #555;
-            border: 1px solid #ddd;
-            border-radius: 16px;
-            padding: 6px 12px;
-            font-size: 13px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        
-        .refinement-button:hover {
-            background-color: #eee;
-            border-color: #bbb;
-        }
-        
-        /* Action Buttons (like "Show More") */
-        .action-button {
-            background-color: #0078d4;
-            color: white;
-            border: none;
-            border-radius: 16px;
-            padding: 8px 16px;
-            font-size: 14px;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            margin-top: 8px;
-            display: inline-block;
-        }
-        
-        .action-button:hover {
-            background-color: #0069b8;
-        }
-        
-        /* Active filters display */
-        .active-filters {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin: 12px 0;
-            padding: 8px;
-            background-color: #f8f8f8;
-            border-radius: 8px;
-        }
-        
-        .filter-tag {
-            background-color: #e0f0ff;
-            color: #0078d4;
-            border-radius: 12px;
-            padding: 4px 10px;
-            font-size: 12px;
-            display: flex;
-            align-items: center;
-        }
-        
-        .filter-tag .remove {
-            margin-left: 6px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        
-        /* Step indicator for progressive conversations */
-        .step-indicator {
-            display: flex;
-            justify-content: center;
-            margin: 12px 0;
-        }
-        
-        .step {
-            width: 8px;
-            height: 8px;
-            background-color: #ddd;
-            border-radius: 50%;
-            margin: 0 4px;
-        }
-        
-        .step.active {
-            background-color: #0078d4;
-            width: 10px;
-            height: 10px;
-        }
     </style>
 </head>
 <body>
@@ -321,7 +206,7 @@
     <!-- Debug panel (for development) -->
     <div id="debug-panel" class="debug-panel"></div>
 
- <script>
+    <script>
         // Debug flag - set to true to show debug panel and logs
         const DEBUG_MODE = true;
         
@@ -414,11 +299,11 @@
         // Add welcome message and load properties when page loads
         window.addEventListener('load', async function() {
             // Add welcome message
-            const welcomeMessage = "Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?<br><br><button class='action-button' onclick='startProgressiveConversation()'>Start Guided Search</button>";
+            const welcomeMessage = "Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?";
             addMessage(welcomeMessage, 'bot');
             
-            // Add to conversation history (without the HTML)
-            conversationHistory.push({role: "assistant", content: "Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?"});
+            // Add to conversation history
+            conversationHistory.push({role: "assistant", content: welcomeMessage});
             
             // Load properties
             await loadProperties();
@@ -447,11 +332,11 @@
             document.getElementById('messages').innerHTML = '';
             
             // Add welcome message
-            const welcomeMessage = "Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?<br><br><button class='action-button' onclick='startProgressiveConversation()'>Start Guided Search</button>";
+            const welcomeMessage = "Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?";
             addMessage(welcomeMessage, 'bot');
             
             // Add to conversation history
-            conversationHistory.push({role: "assistant", content: "Hello! I'm your Integis property assistant. How can I help you find the perfect commercial property today?"});
+            conversationHistory.push({role: "assistant", content: welcomeMessage});
             
             debugLog("Chat reset, conversation state cleared");
         });
@@ -511,8 +396,9 @@
             }
             
             return false;
-        }   
-     // Extract search criteria from user input
+        }
+
+        // Extract search criteria from user input
         function extractSearchCriteria(userInput, previousCriteria = null) {
             debugLog("Extracting search criteria from:", userInput);
             let criteria = previousCriteria ? {...previousCriteria} : {};
@@ -968,6 +854,198 @@
             return html;
         }
 
+        // Updated local response generator with improved criteria handling
+        function generateLocalResponse(userInput) {
+            debugLog("Generating local response for:", userInput);
+            userInput = userInput.toLowerCase();
+            
+            // Store for future reference
+            conversationState.lastQuery = userInput;
+            
+            // Check if properties are loaded
+            if (!propertiesLoaded || properties.length === 0) {
+                debugLog("Properties not loaded, returning error message");
+                return "I don't have access to our property listings at the moment. Please try again later or contact Integis directly for assistance.";
+            }
+            
+            // Determine language for response (simple heuristic)
+            const isCzechQuery = isCzech(userInput);
+            debugLog("Language detection - isCzech:", isCzechQuery);
+            
+            // Check if this is a follow-up question
+            const isFollowUp = isFollowUpQuestion(userInput);
+            debugLog("Is follow-up question:", isFollowUp);
+            
+            // Create search criteria
+            let criteria = {};
+            
+            // If follow-up, start with previous criteria
+            if (isFollowUp && conversationState.currentSearchCriteria) {
+                criteria = {...conversationState.currentSearchCriteria};
+                debugLog("Using previous search criteria as base:", criteria);
+                
+                // For pagination requests, keep the same criteria but update offset
+                if (/more|další|show more|ukázat více/i.test(userInput)) {
+                    conversationState.offset += 5; // Show next 5 results
+                    debugLog("Pagination request - updating offset to:", conversationState.offset);
+                }
+            } else {
+                // Reset offset for new searches
+                conversationState.offset = 0;
+            }
+            
+            // Extract new criteria
+            const newCriteria = extractSearchCriteria(userInput);
+            
+            // Merge with existing criteria, with new values taking precedence
+            criteria = {...criteria, ...newCriteria};
+            
+            // For requests to "show all" - start fresh with just the core criteria
+            if (/show all|share all|all properties|all units|všechny|všechny jednotky/i.test(userInput)) {
+                // Keep only the most important criteria (type, location, size) and reset pagination
+                const coreCriteria = {};
+                if (criteria.type) coreCriteria.type = criteria.type;
+                if (criteria.location) coreCriteria.location = criteria.location;
+                if (criteria.size) coreCriteria.size = criteria.size;
+                if (criteria.maxSize) coreCriteria.maxSize = criteria.maxSize;
+                if (criteria.minSize) coreCriteria.minSize = criteria.minSize;
+                
+                criteria = coreCriteria;
+                conversationState.offset = 0;
+                debugLog("'Show all' request - using core criteria only:", criteria);
+            }
+            
+            // IMPORTANT: Update the global conversation state with the new criteria
+            conversationState.currentSearchCriteria = {...criteria};
+            debugLog("Updated conversation state with new criteria:", conversationState.currentSearchCriteria);
+            
+            // Search for matching properties with enhanced search function
+            let matchedProperties = enhancedSearchProperties(criteria);
+            
+            // Store the properties we've shown for follow-up questions
+            if (matchedProperties.length > 0) {
+                const propertiesToShow = matchedProperties.slice(
+                    conversationState.offset, 
+                    conversationState.offset + 5
+                );
+                
+                // Update last shown properties
+                conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
+                debugLog("Updated last shown properties:", conversationState.lastShownProperties);
+            }
+            
+            // Generate response
+            if (matchedProperties.length > 0) {
+                debugLog(`Generating response with ${matchedProperties.length} matching properties (offset: ${conversationState.offset})`);
+                
+                let response = "";
+                
+                if (isFollowUp && /more|další|show more|ukázat více/i.test(userInput) && conversationState.offset > 0) {
+                    response = isCzechQuery 
+                        ? `Ano, zde jsou další nemovitosti, které splňují vaše kritéria:<br><br>`
+                        : `Yes, here are more properties that match your criteria:<br><br>`;
+                } else if (isFollowUp) {
+                    if (criteria.location && criteria.type) {
+                        if (criteria.minSize && criteria.maxSize) {
+                            response = isCzechQuery 
+                                ? `Našel jsem tyto ${criteria.type} prostory v lokalitě ${criteria.location} o velikosti mezi ${criteria.minSize} a ${criteria.maxSize} m²:<br><br>`
+                                : `I found these ${criteria.type} spaces in ${criteria.location} with a size between ${criteria.minSize} and ${criteria.maxSize} sqm:<br><br>`;
+                        } else if (criteria.size) {
+                            response = isCzechQuery 
+                                ? `Našel jsem tyto ${criteria.type} prostory v lokalitě ${criteria.location} o velikosti kolem ${criteria.size} m²:<br><br>`
+                                : `I found these ${criteria.type} spaces in ${criteria.location} with a size around ${criteria.size} sqm:<br><br>`;
+                        } else {
+                            response = isCzechQuery 
+                                ? `Našel jsem tyto ${criteria.type} prostory v lokalitě ${criteria.location}:<br><br>`
+                                : `I found these ${criteria.type} spaces in ${criteria.location}:<br><br>`;
+                        }
+                    } else {
+                        response = isCzechQuery 
+                            ? `Na základě upřesněných kritérií jsem našel tyto nemovitosti:<br><br>`
+                            : `Based on your refined criteria, I found these properties:<br><br>`;
+                    }
+                } else {
+                    response = isCzechQuery 
+                        ? `Na základě vašeho dotazu jsem našel tyto nemovitosti, které by vás mohly zajímat:<br><br>`
+                        : `Based on your query, I found these properties that might interest you:<br><br>`;
+                }
+                
+                // Get the relevant slice for pagination
+                const propertiesToShow = matchedProperties.slice(
+                    conversationState.offset, 
+                    conversationState.offset + 5
+                );
+                
+                // If no properties to show at current offset but we have matches
+                if (propertiesToShow.length === 0 && matchedProperties.length > 0) {
+                    // Reset offset to 0 and show the first page
+                    conversationState.offset = 0;
+                    const propertiesToShow = matchedProperties.slice(0, 5);
+                    
+                    response = isCzechQuery 
+                        ? `Došli jsme na konec výsledků. Zde jsou znovu první nemovitosti:<br><br>`
+                        : `We've reached the end of the results. Here are the first properties again:<br><br>`;
+                        
+                    conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
+                }
+                
+                // Add property listings HTML
+                response += generatePropertyListingHTML(matchedProperties, conversationState.offset, 5);
+                
+                // Add pagination information
+                const remainingCount = matchedProperties.length - (conversationState.offset + propertiesToShow.length);
+                if (remainingCount > 0) {
+                    response += isCzechQuery
+                        ? `<br>Zobrazuji ${conversationState.offset + 1}-${conversationState.offset + propertiesToShow.length} z ${matchedProperties.length} nalezených nemovitostí. Napište "více" pro zobrazení dalších.`
+                        : `<br>Showing ${conversationState.offset + 1}-${conversationState.offset + propertiesToShow.length} of ${matchedProperties.length} matching properties. Type "more" to see more.`;
+                } else {
+                    response += isCzechQuery
+                        ? `<br>Zobrazuji ${propertiesToShow.length} z ${matchedProperties.length} nalezených nemovitostí.`
+                        : `<br>Showing ${propertiesToShow.length} of ${matchedProperties.length} matching properties.`;
+                }
+                
+                // Add follow-up prompt
+                response += isCzechQuery
+                    ? `<br><br>Přejete si více informací o některé z těchto nemovitostí nebo chcete upřesnit vyhledávání?`
+                    : `<br><br>Would you like more details about any of these properties or would you like to refine your search?`;
+                    
+                return response;
+            } else {
+                debugLog("No matching properties found");
+                
+                let noMatchResponse = "";
+                
+                if (isFollowUp) {
+                    noMatchResponse = isCzechQuery
+                        ? `Bohužel jsem nenašel žádné nemovitosti, které by odpovídaly těmto upřesněným požadavkům. Možná zkuste jiné parametry?`
+                        : `I couldn't find any properties matching these refined criteria. Perhaps try different parameters?`;
+                        
+                    // Suggest alternatives by relaxing constraints
+                    if (criteria.location && criteria.type) {
+                        // Try without size constraint
+                        const withoutSizeSearch = {...criteria};
+                        delete withoutSizeSearch.size;
+                        delete withoutSizeSearch.maxSize;
+                        delete withoutSizeSearch.minSize;
+                        
+                        const sizeAlternatives = enhancedSearchProperties(withoutSizeSearch);
+                        
+                        if (sizeAlternatives.length > 0) {
+                            noMatchResponse += isCzechQuery
+                                ? `<br><br>Našel jsem však ${sizeAlternatives.length} ${criteria.type} nemovitostí v lokalitě ${criteria.location} bez omezení velikosti. Přejete si je zobrazit?`
+                                : `<br><br>However, I found ${sizeAlternatives.length} ${criteria.type} properties in ${criteria.location} without size restrictions. Would you like to see them?`;
+                        }
+                    }
+                } else {
+                    noMatchResponse = isCzechQuery
+                        ? `Bohužel jsem nenašel přesné shody pro vaše kritéria z našich ${properties.length} nemovitostí. Můžete zkusit obecnější vyhledávání? Například se můžete zeptat na "kancelářské prostory v Praze" nebo "obchodní prostory kolem 800 sqm".`
+                        : `I couldn't find exact matches for your criteria from our ${properties.length} properties. Could you try a more general search? For example, you can ask about "office space in Prague" or "retail space around 800 sqm".`;
+                }
+                
+                return noMatchResponse;
+            }
+        }
+
         // New function to call Gemini API specifically for people to sqm conversion
         async function callGeminiAPIForPeopleConversion(peopleCount, spaceType = "office") {
             debugLog("Calling Gemini API to convert people count to sqm");
@@ -1074,8 +1152,8 @@
                 debugLog("Properties not loaded, returning error message");
                 return "I don't have access to our property listings at the moment. Please try again later or ask general questions about commercial real estate.";
             }
-
-     // Format properties as text for the prompt (limited to keep size manageable)
+            
+            // Format properties as text for the prompt (limited to keep size manageable)
             let propertiesText = "";
             properties.slice(0, 20).forEach(property => { // Reduced to 20 properties
                 let detailsText = `- ${property.name}: ${property.size} sqm ${property.type || ""}`;
@@ -1522,649 +1600,6 @@ ${propertiesText}`;
             });
         }
 
-        // Function to handle button clicks
-        function handleSuggestionClick(suggestion) {
-            // Add the suggestion text to the input field
-            document.getElementById('user-input').value = suggestion;
-            
-            // Submit the form (trigger sendMessage)
-            sendMessage();
-        }
-
-        // Function to handle refinement button clicks
-        function handleRefinementClick(refinementType, value) {
-            // Get current criteria
-            let criteria = {...conversationState.currentSearchCriteria} || {};
-            
-            // Update criteria based on refinement type
-            switch (refinementType) {
-                case 'minSize':
-                    criteria.minSize = value;
-                    break;
-                case 'maxSize':
-                    criteria.maxSize = value;
-                    break;
-                case 'type':
-                    criteria.type = value;
-                    break;
-                case 'location':
-                    criteria.location = value;
-                    break;
-                case 'available':
-                    criteria.available = value;
-                    break;
-                case 'clearSize':
-                    delete criteria.size;
-                    delete criteria.minSize;
-                    delete criteria.maxSize;
-                    break;
-                default:
-                    break;
-            }
-            
-            // Update conversation state
-            conversationState.currentSearchCriteria = criteria;
-            
-            // Generate a message to show what we're doing
-            const message = `Updating search: ${refinementType} = ${value}`;
-            debugLog(message);
-            
-            // Add user message (showing what refinement was chosen)
-            const refinementText = isCzech(document.getElementById('user-input').value) 
-                ? `Upřesnit vyhledávání: ${getReadableCriteria(refinementType, value, true)}`
-                : `Refine search: ${getReadableCriteria(refinementType, value, false)}`;
-            
-            addMessage(refinementText, 'user');
-            conversationHistory.push({role: "user", content: refinementText});
-            
-            // Trigger a new search with updated criteria
-            const searchResults = enhancedSearchProperties(criteria);
-            
-            // Generate and show results
-            displaySearchResults(searchResults, criteria);
-        }
-
-        // Function to get readable criteria text
-        function getReadableCriteria(type, value, isCzechLanguage) {
-            if (isCzechLanguage) {
-                switch (type) {
-                    case 'minSize': return `Minimální velikost: ${value} m²`;
-                    case 'maxSize': return `Maximální velikost: ${value} m²`;
-                    case 'type': 
-                        if (value === 'office') return 'Typ: Kanceláře';
-                        if (value === 'retail') return 'Typ: Obchodní prostory';
-                        if (value === 'industrial') return 'Typ: Průmyslové prostory';
-                        return `Typ: ${value}`;
-                    case 'location': return `Lokalita: ${value}`;
-                    case 'available': 
-                        if (value === 'now') return 'Dostupnost: Ihned';
-                        return `Dostupnost: ${value}`;
-                    case 'clearSize': return 'Odstranit omezení velikosti';
-                    default: return `${type}: ${value}`;
-                }
-            } else {
-                switch (type) {
-                    case 'minSize': return `Minimum size: ${value} sqm`;
-                    case 'maxSize': return `Maximum size: ${value} sqm`;
-                    case 'type': return `Type: ${value}`;
-                    case 'location': return `Location: ${value}`;
-                    case 'available': 
-                        if (value === 'now') return 'Availability: Immediate';
-                        return `Availability: ${value}`;
-                    case 'clearSize': return 'Clear size restrictions';
-                    default: return `${type}: ${value}`;
-                }
-            }
-        }
-
-        // Function to display search results
-        function displaySearchResults(matchedProperties, criteria) {
-            // Show typing indicator
-            const typingIndicator = document.createElement('div');
-            typingIndicator.className = 'typing-indicator';
-            typingIndicator.textContent = 'Typing...';
-            typingIndicator.id = 'typing-indicator';
-            document.getElementById('messages').appendChild(typingIndicator);
-            
-            // Short timeout to show the typing indicator before showing results
-            setTimeout(() => {
-                if (document.getElementById('typing-indicator')) {
-                    document.getElementById('typing-indicator').remove();
-                }
-                
-                // Reset pagination offset
-                conversationState.offset = 0;
-                
-                // Check if we have results
-                if (matchedProperties.length > 0) {
-                    // Generate introduction text
-                    const isCzechQuery = isCzech(document.getElementById('user-input').value);
-                    let response = isCzechQuery 
-                        ? `Našel jsem ${matchedProperties.length} nemovitostí s těmito parametry:<br><br>`
-                        : `I found ${matchedProperties.length} properties with these parameters:<br><br>`;
-                    
-                    // Add active filters section
-                    response += generateActiveFiltersHTML(criteria, isCzechQuery);
-                    
-                    // Add property listings
-                    response += generatePropertyListingHTML(matchedProperties, 0, 5);
-                    
-                    // Add pagination (now with a button instead of text)
-                    if (matchedProperties.length > 5) {
-                        response += isCzechQuery
-                            ? `<br>Zobrazuji 1-5 z ${matchedProperties.length} nalezených nemovitostí.<br>`
-                            : `<br>Showing 1-5 of ${matchedProperties.length} matching properties.<br>`;
-                        
-                        // Add "Show More" button
-                        response += `<div class="action-button-container">
-                            <button class="action-button" onclick="handleShowMore()">${isCzechQuery ? 'Zobrazit další' : 'Show More'}</button>
-                        </div>`;
-                    } else {
-                        response += isCzechQuery
-                            ? `<br>Zobrazuji ${matchedProperties.length} z ${matchedProperties.length} nalezených nemovitostí.`
-                            : `<br>Showing ${matchedProperties.length} of ${matchedProperties.length} matching properties.`;
-                    }
-                    
-                    // Add refinement buttons
-                    response += generateRefinementButtonsHTML(criteria, isCzechQuery);
-                    
-                    // Add suggestion buttons for common follow-ups
-                    response += generateSuggestionButtonsHTML(criteria, isCzechQuery);
-                    
-                    // Update last shown properties
-                    conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
-                    
-                    // Display the response
-                    addMessage(response, 'bot');
-                    conversationHistory.push({role: "assistant", content: response});
-                } else {
-                    // No results found
-                    const isCzechQuery = isCzech(document.getElementById('user-input').value);
-                    let noResultsResponse = isCzechQuery
-                        ? `Bohužel jsem nenašel žádné nemovitosti odpovídající těmto kritériím.<br><br>`
-                        : `I couldn't find any properties matching these criteria.<br><br>`;
-                    
-                    // Add active filters section
-                    noResultsResponse += generateActiveFiltersHTML(criteria, isCzechQuery);
-                    
-                    // Add suggestion to modify search
-                    noResultsResponse += isCzechQuery
-                        ? `<p>Zkuste upravit vyhledávací kritéria pro více výsledků:</p>`
-                        : `<p>Try modifying your search criteria for more results:</p>`;
-                    
-                    // Add buttons to relax search criteria
-                    noResultsResponse += `<div class="suggestion-buttons">`;
-                    
-                    if (criteria.minSize || criteria.maxSize || criteria.size) {
-                        noResultsResponse += `<button class="suggestion-button" onclick="handleRefinementClick('clearSize', '')">${isCzechQuery ? 'Odstranit omezení velikosti' : 'Remove size restrictions'}</button>`;
-                    }
-                    
-                    // More buttons to try different locations or types
-                    if (criteria.type) {
-                        const types = ['office', 'retail', 'industrial'].filter(t => t !== criteria.type);
-                        types.forEach(type => {
-                            const typeLabel = type === 'office' 
-                                ? (isCzechQuery ? 'Kanceláře' : 'Office')
-                                : type === 'retail' 
-                                    ? (isCzechQuery ? 'Obchodní prostory' : 'Retail')
-                                    : (isCzechQuery ? 'Průmyslové prostory' : 'Industrial');
-                            
-                            noResultsResponse += `<button class="suggestion-button" onclick="handleRefinementClick('type', '${type}')">${typeLabel}</button>`;
-                        });
-                    }
-                    
-                    if (criteria.location) {
-                        const locations = ['Prague', 'Brno', 'Ostrava'].filter(l => !criteria.location.includes(l));
-                        locations.forEach(location => {
-                            noResultsResponse += `<button class="suggestion-button" onclick="handleRefinementClick('location', '${location}')">${location}</button>`;
-                        });
-                    }
-                    
-                    noResultsResponse += `</div>`;
-                    
-                    // Display the response
-                    addMessage(noResultsResponse, 'bot');
-                    conversationHistory.push({role: "assistant", content: noResultsResponse});
-                }
-            }, 500);
-        }
-
-        // Function to generate active filters HTML
-        function generateActiveFiltersHTML(criteria, isCzechQuery) {
-            let filtersHTML = '';
-            const hasFilters = Object.keys(criteria).length > 0 && 
-                             (criteria.type || criteria.location || criteria.minSize || 
-                              criteria.maxSize || criteria.size || criteria.available);
-            
-            if (hasFilters) {
-                filtersHTML += `<div class="active-filters">
-                    <div style="width:100%; margin-bottom:5px; font-size:12px; color:#666;">
-                        ${isCzechQuery ? 'Aktivní filtry:' : 'Active filters:'}
-                    </div>`;
-                
-                if (criteria.type) {
-                    const typeLabel = criteria.type === 'office' 
-                        ? (isCzechQuery ? 'Kanceláře' : 'Office')
-                        : criteria.type === 'retail' 
-                            ? (isCzechQuery ? 'Obchodní prostory' : 'Retail')
-                            : (isCzechQuery ? 'Průmyslové prostory' : 'Industrial');
-                    
-                    filtersHTML += `<div class="filter-tag">${typeLabel}</div>`;
-                }
-                
-                if (criteria.location) {
-                    filtersHTML += `<div class="filter-tag">${criteria.location}</div>`;
-                }
-                
-                if (criteria.size) {
-                    filtersHTML += `<div class="filter-tag">${isCzechQuery ? 'Přibližně' : 'Around'} ${criteria.size} ${isCzechQuery ? 'm²' : 'sqm'}</div>`;
-                } else if (criteria.minSize && criteria.maxSize) {
-                    filtersHTML += `<div class="filter-tag">${criteria.minSize}-${criteria.maxSize} ${isCzechQuery ? 'm²' : 'sqm'}</div>`;
-                } else if (criteria.minSize) {
-                    filtersHTML += `<div class="filter-tag">${isCzechQuery ? 'Min' : 'Min'} ${criteria.minSize} ${isCzechQuery ? 'm²' : 'sqm'}</div>`;
-                } else if (criteria.maxSize) {
-                    filtersHTML += `<div class="filter-tag">${isCzechQuery ? 'Max' : 'Max'} ${criteria.maxSize} ${isCzechQuery ? 'm²' : 'sqm'}</div>`;
-                }
-                
-                if (criteria.available) {
-                    const availLabel = criteria.available === 'now'
-                        ? (isCzechQuery ? 'Dostupné ihned' : 'Available now')
-                        : criteria.available;
-                    
-                    filtersHTML += `<div class="filter-tag">${availLabel}</div>`;
-                }
-                
-                filtersHTML += `</div>`;
-            }
-            
-            return filtersHTML;
-        }
-
-        // Function to generate refinement buttons HTML
-        function generateRefinementButtonsHTML(criteria, isCzechQuery) {
-            let buttonsHTML = `<div class="refinement-buttons">
-                <div style="width:100%; margin-bottom:5px; font-size:12px; color:#666;">
-                    ${isCzechQuery ? 'Upřesnit vyhledávání:' : 'Refine your search:'}
-                </div>`;
-            
-            // Size refinements
-            if (!criteria.minSize && !criteria.maxSize) {
-                // Add some standard size options if no size filter applied yet
-                const sizes = [
-                    { min: 100, max: 300 },
-                    { min: 300, max: 500 },
-                    { min: 500, max: 1000 },
-                    { min: 1000, max: 2000 }
-                ];
-                
-                sizes.forEach(size => {
-                    buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('minSize', ${size.min}); handleRefinementClick('maxSize', ${size.max});">
-                        ${size.min}-${size.max} ${isCzechQuery ? 'm²' : 'sqm'}
-                    </button>`;
-                });
-            } else {
-                // Option to clear size filter if one is applied
-                buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('clearSize', '')">
-                    ${isCzechQuery ? 'Odstranit omezení velikosti' : 'Clear size filter'}
-                </button>`;
-            }
-            
-            // Type refinements (if not already specified)
-            if (!criteria.type) {
-                buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('type', 'office')">
-                    ${isCzechQuery ? 'Kanceláře' : 'Office'}
-                </button>
-                <button class="refinement-button" onclick="handleRefinementClick('type', 'retail')">
-                    ${isCzechQuery ? 'Obchodní prostory' : 'Retail'}
-                </button>
-                <button class="refinement-button" onclick="handleRefinementClick('type', 'industrial')">
-                    ${isCzechQuery ? 'Průmyslové prostory' : 'Industrial'}
-                </button>`;
-            }
-            
-            // Location refinements (if not already specified)
-            if (!criteria.location) {
-                buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('location', 'Prague')">Prague</button>
-                <button class="refinement-button" onclick="handleRefinementClick('location', 'Brno')">Brno</button>
-                <button class="refinement-button" onclick="handleRefinementClick('location', 'Ostrava')">Ostrava</button>`;
-            } else if (criteria.location === 'Prague' && !criteria.location.includes('Prague ')) {
-                // Add Prague district options
-                buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 1')">Prague 1</button>
-                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 4')">Prague 4</button>
-                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 5')">Prague 5</button>
-                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 8')">Prague 8</button>`;
-            }
-            
-            // Availability refinement
-            if (!criteria.available) {
-                buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('available', 'now')">
-                    ${isCzechQuery ? 'Dostupné ihned' : 'Available now'}
-                </button>`;
-            }
-            
-            buttonsHTML += `</div>`;
-            
-            return buttonsHTML;
-        }
-
-        // Function to generate suggestion buttons HTML
-        function generateSuggestionButtonsHTML(criteria, isCzechQuery) {
-            let buttonsHTML = `<div class="suggestion-buttons">
-                <div style="width:100%; margin-bottom:5px; font-size:12px; color:#666;">
-                    ${isCzechQuery ? 'Můžete se také zeptat:' : 'You can also ask:'}
-                </div>`;
-            
-            // Generate relevant suggestions based on current criteria
-            if (criteria.type && criteria.location) {
-                // They already specified type and location, suggest size or specifics
-                buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? 'Kolik stojí ' + criteria.type + ' v ' + criteria.location + '?' : 'How much does ' + criteria.type + ' space cost in ' + criteria.location + '?'}')">
-                    ${isCzechQuery ? 'Kolik stojí ' + criteria.type + ' v ' + criteria.location + '?' : 'How much does ' + criteria.type + ' space cost in ' + criteria.location + '?'}
-                </button>`;
-                
-                buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? 'Máte nějaké ' + criteria.type + ' s parkováním v ' + criteria.location + '?' : 'Do you have any ' + criteria.type + ' space with parking in ' + criteria.location + '?'}')">
-                    ${isCzechQuery ? 'S parkováním?' : 'With parking?'}
-                </button>`;
-            } else if (criteria.type) {
-                // They specified type but not location
-                buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? 'Kde máte nejlevnější ' + criteria.type + '?' : 'Where do you have the cheapest ' + criteria.type + ' space?'}')">
-                    ${isCzechQuery ? 'Kde máte nejlevnější ' + criteria.type + '?' : 'Where are your cheapest ' + criteria.type + ' spaces?'}
-                </button>`;
-                
-                // Suggest popular locations
-                ['Prague', 'Brno', 'Ostrava'].forEach(location => {
-                    buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? criteria.type + ' v ' + location : criteria.type + ' in ' + location}')">
-                        ${isCzechQuery ? criteria.type + ' v ' + location : criteria.type + ' in ' + location}
-                    </button>`;
-                });
-            } else if (criteria.location) {
-                // They specified location but not type
-                buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? 'Jaké typy nemovitostí máte v ' + criteria.location + '?' : 'What types of properties do you have in ' + criteria.location + '?'}')">
-                    ${isCzechQuery ? 'Jaké typy nemovitostí máte v ' + criteria.location + '?' : 'What types of properties in ' + criteria.location + '?'}
-                </button>`;
-                
-                // Suggest different property types
-                const types = [
-                    { value: 'office', labelCz: 'Kanceláře', labelEn: 'Office space' },
-                    { value: 'retail', labelCz: 'Obchodní prostory', labelEn: 'Retail space' },
-                    { value: 'industrial', labelCz: 'Průmyslové prostory', labelEn: 'Industrial space' }
-                ];
-                
-                types.forEach(type => {
-                    buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? type.labelCz + ' v ' + criteria.location : type.labelEn + ' in ' + criteria.location}')">
-                        ${isCzechQuery ? type.labelCz + ' v ' + criteria.location : type.labelEn + ' in ' + criteria.location}
-                    </button>`;
-                });
-            } else {
-                // No specific criteria yet, suggest common starting points
-                const suggestions = isCzechQuery 
-                    ? ['Kancelářské prostory v Praze', 'Obchodní prostory v centru', 'Průmyslové prostory větší než 1000 m²', 'Prostory pro 50 lidí'] 
-                    : ['Office space in Prague', 'Retail space in city center', 'Industrial space larger than 1000 sqm', 'Space for 50 people'];
-                
-                suggestions.forEach(suggestion => {
-                    buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${suggestion}')">
-                        ${suggestion}
-                    </button>`;
-                });
-            }
-            
-            buttonsHTML += `</div>`;
-            
-            return buttonsHTML;
-        }
-
-        // Function to handle "Show More" button click
-        function handleShowMore() {
-            // Add user message
-            const moreText = isCzech(document.getElementById('user-input').value) ? "Zobrazit další" : "Show more";
-            addMessage(moreText, 'user');
-            conversationHistory.push({role: "user", content: moreText});
-            
-            // Increase offset
-            conversationState.offset += 5;
-            
-            // Get current criteria
-            const criteria = {...conversationState.currentSearchCriteria} || {};
-            
-            // Search for matching properties
-            const matchedProperties = enhancedSearchProperties(criteria);
-            
-            // Show typing indicator
-            const typingIndicator = document.createElement('div');
-            typingIndicator.className = 'typing-indicator';
-            typingIndicator.textContent = 'Typing...';
-            typingIndicator.id = 'typing-indicator';
-            document.getElementById('messages').appendChild(typingIndicator);
-            
-            // Short timeout to show the typing indicator before showing results
-            setTimeout(() => {
-                if (document.getElementById('typing-indicator')) {
-                    document.getElementById('typing-indicator').remove();
-                }
-                
-                // Generate response
-                const isCzechQuery = isCzech(document.getElementById('user-input').value);
-                let response = isCzechQuery 
-                    ? `Ano, zde jsou další nemovitosti, které splňují vaše kritéria:<br><br>`
-                    : `Yes, here are more properties that match your criteria:<br><br>`;
-                
-                // Get the relevant slice for pagination
-                const start = conversationState.offset;
-                const end = conversationState.offset + 5;
-                const propertiesToShow = matchedProperties.slice(start, end);
-                
-                // If no properties to show at current offset but we have matches, wrap around
-                if (propertiesToShow.length === 0 && matchedProperties.length > 0) {
-                    // Reset offset to 0 and show the first page
-                    conversationState.offset = 0;
-                    
-                    response = isCzechQuery 
-                        ? `Došli jsme na konec výsledků. Zde jsou znovu první nemovitosti:<br><br>`
-                        : `We've reached the end of the results. Here are the first properties again:<br><br>`;
-                        
-                    // Update properties to show
-                    const firstPageProperties = matchedProperties.slice(0, 5);
-                    // Update last shown properties
-                    conversationState.lastShownProperties = firstPageProperties.map(p => p.name);
-                    
-                    // Add property listings
-                    response += generatePropertyListingHTML(matchedProperties, 0, 5);
-                } else {
-                    // Update last shown properties
-                    conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
-                    
-                    // Add property listings
-                    response += generatePropertyListingHTML(matchedProperties, conversationState.offset, 5);
-                }
-                
-                // Add pagination information with Show More button
-                const nextBatch = conversationState.offset + 5;
-                const remaining = matchedProperties.length - nextBatch;
-                
-                if (remaining > 0) {
-                    response += isCzechQuery
-                        ? `<br>Zobrazuji ${conversationState.offset + 1}-${conversationState.offset + propertiesToShow.length} z ${matchedProperties.length} nalezených nemovitostí.<br>`
-                        : `<br>Showing ${conversationState.offset + 1}-${conversationState.offset + propertiesToShow.length} of ${matchedProperties.length} matching properties.<br>`;
-                    
-                    // Add "Show More" button
-                    response += `<div class="action-button-container">
-                        <button class="action-button" onclick="handleShowMore()">${isCzechQuery ? 'Zobrazit další' : 'Show More'}</button>
-                    </div>`;
-                } else {
-                    response += isCzechQuery
-                        ? `<br>Zobrazuji ${conversationState.offset + 1}-${matchedProperties.length} z ${matchedProperties.length} nalezených nemovitostí.`
-                        : `<br>Showing ${conversationState.offset + 1}-${matchedProperties.length} of ${matchedProperties.length} matching properties.`;
-                }
-                
-                // Add suggestion buttons
-                response += generateSuggestionButtonsHTML(criteria, isCzechQuery);
-                
-                // Display the response
-                addMessage(response, 'bot');
-                conversationHistory.push({role: "assistant", content: response});
-            }, 500);
-        }
-
-        // Function to start a progressive conversation
-        function startProgressiveConversation() {
-            const steps = [
-                { question: 'What type of commercial property are you looking for?', field: 'type' },
-                { question: 'Where would you like the property to be located?', field: 'location' },
-                { question: 'What size range are you interested in (in sqm)?', field: 'size' },
-                { question: 'When do you need the space to be available?', field: 'available' }
-            ];
-            
-            // Store the conversation flow in the state
-            conversationState.progressiveFlow = {
-                steps: steps,
-                currentStep: 0,
-                answers: {}
-            };
-            
-            // Display the first question
-            const firstQuestion = steps[0].question;
-            
-            // Add contextual buttons for the first question
-            let buttons = '';
-            
-            if (steps[0].field === 'type') {
-                buttons = `<div class="suggestion-buttons">
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('office', 'Office space')">Office space</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('retail', 'Retail space')">Retail space</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('industrial', 'Industrial space')">Industrial space</button>
-                </div>`;
-            }
-            
-            // Display the first question with step indicator
-            let message = `<div class="step-indicator">
-                <div class="step active"></div>
-                <div class="step"></div>
-                <div class="step"></div>
-                <div class="step"></div>
-            </div>
-            <p>${firstQuestion}</p>
-            ${buttons}`;
-            
-            addMessage(message, 'bot');
-            conversationHistory.push({role: "assistant", content: firstQuestion});
-        }
-
-        // Function to handle progressive answers
-        function handleProgressiveAnswer(value, displayText) {
-            // First, display the user's answer
-            addMessage(displayText, 'user');
-            conversationHistory.push({role: "user", content: displayText});
-            
-            // Get the current flow
-            const flow = conversationState.progressiveFlow;
-            if (!flow) return;
-            
-            // Save the answer
-            const currentField = flow.steps[flow.currentStep].field;
-            flow.answers[currentField] = value;
-            
-            // Move to the next step
-            flow.currentStep++;
-            
-            // Check if we've completed all steps
-            if (flow.currentStep >= flow.steps.length) {
-                // We're done, perform the search with collected criteria
-                const criteria = {
-                    type: flow.answers.type,
-                    location: flow.answers.location
-                };
-                
-                // Handle size (could be a range or single value)
-                if (flow.answers.size && flow.answers.size.includes('-')) {
-                    const [min, max] = flow.answers.size.split('-');
-                    criteria.minSize = min.trim();
-                    criteria.maxSize = max.trim();
-                } else if (flow.answers.size) {
-                    criteria.size = flow.answers.size;
-                }
-                
-                // Handle availability
-                if (flow.answers.available) {
-                    criteria.available = flow.answers.available;
-                }
-                
-                // Update conversation state
-                conversationState.currentSearchCriteria = criteria;
-                
-                // Show typing indicator
-                const typingIndicator = document.createElement('div');
-                typingIndicator.className = 'typing-indicator';
-                typingIndicator.textContent = 'Typing...';
-                typingIndicator.id = 'typing-indicator';
-                document.getElementById('messages').appendChild(typingIndicator);
-                
-                // Short timeout to show the typing indicator
-                setTimeout(() => {
-                    if (document.getElementById('typing-indicator')) {
-                        document.getElementById('typing-indicator').remove();
-                    }
-                    
-                    // Reset the progressive flow
-                    delete conversationState.progressiveFlow;
-                    
-                    // Search for matching properties
-                    const matchedProperties = enhancedSearchProperties(criteria);
-                    
-                    // Display results
-                    displaySearchResults(matchedProperties, criteria);
-                }, 1000);
-                
-                return;
-            }
-            
-            // Display the next question
-            const nextQuestion = flow.steps[flow.currentStep].question;
-            let buttons = '';
-            
-            // Add contextual buttons based on the current field
-            if (flow.steps[flow.currentStep].field === 'location') {
-                buttons = `<div class="suggestion-buttons">
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('Prague', 'Prague')">Prague</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('Brno', 'Brno')">Brno</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('Ostrava', 'Ostrava')">Ostrava</button>
-                </div>`;
-            } else if (flow.steps[flow.currentStep].field === 'size') {
-                buttons = `<div class="suggestion-buttons">
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('100-300', '100-300 sqm')">100-300 sqm</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('300-500', '300-500 sqm')">300-500 sqm</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('500-1000', '500-1000 sqm')">500-1000 sqm</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('1000-2000', '1000-2000 sqm')">1000-2000 sqm</button>
-                </div>`;
-            } else if (flow.steps[flow.currentStep].field === 'available') {
-                buttons = `<div class="suggestion-buttons">
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('now', 'Immediately')">Immediately</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('Q3 2025', 'Q3 2025')">Q3 2025</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('Q4 2025', 'Q4 2025')">Q4 2025</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('Any', 'Any time')">Any time</button>
-                </div>`;
-            }
-            
-            // Update step indicator
-            let stepIndicator = '<div class="step-indicator">';
-            for (let i = 0; i < flow.steps.length; i++) {
-                if (i < flow.currentStep) {
-                    stepIndicator += '<div class="step" style="background-color: #4caf50;"></div>'; // Completed steps
-                } else if (i === flow.currentStep) {
-                    stepIndicator += '<div class="step active"></div>'; // Current step
-                } else {
-                    stepIndicator += '<div class="step"></div>'; // Future steps
-                }
-            }
-            stepIndicator += '</div>';
-            
-            // Display the next question
-            let message = `${stepIndicator}
-            <p>${nextQuestion}</p>
-            ${buttons}`;
-            
-            addMessage(message, 'bot');
-            conversationHistory.push({role: "assistant", content: nextQuestion});
-        }
-
         // Add listener for debug command
         document.getElementById('user-input').addEventListener('input', function(e) {
             if (e.target.value.trim().toLowerCase() === "!test api") {
@@ -2173,21 +1608,6 @@ ${propertiesText}`;
                 e.target.style.backgroundColor = "";
             }
         });
-
-        // This function intercepts button clicks and prevents them from being added to the message history twice
-        document.addEventListener('click', function(e) {
-            if (e.target && e.target.matches('.suggestion-button, .refinement-button, .action-button')) {
-                e.preventDefault();
-                // The actual functionality is handled via onclick attributes on the buttons
-            }
-        });
-        
-        // Add handleSuggestionClick and other functions to window so they can be called from onclick
-        window.handleSuggestionClick = handleSuggestionClick;
-        window.handleRefinementClick = handleRefinementClick;
-        window.handleShowMore = handleShowMore;
-        window.startProgressiveConversation = startProgressiveConversation;
-        window.handleProgressiveAnswer = handleProgressiveAnswer;
     </script>
 </body>
 </html>
