@@ -342,6 +342,12 @@
         // Enter key press event
         document.getElementById('user-input').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
+                const input = document.getElementById('user-input').value.trim().toLowerCase();
+                if (input === "!test api") {
+                    document.getElementById('user-input').value = '';
+                    testGeminiAPI();
+                    return; // Add return statement to prevent normal message processing
+                }
                 sendMessage();
             }
         });
@@ -1384,13 +1390,13 @@ ${propertiesText}`;
         });
 
         // Override send button for debug command
-        const originalSendFunction = document.getElementById('send-button').onclick;
         document.getElementById('send-button').onclick = function() {
             const input = document.getElementById('user-input').value.trim().toLowerCase();
             
             if (input === "!test api") {
                 document.getElementById('user-input').value = '';
                 testGeminiAPI();
+                return; // Add return statement to prevent normal message processing
             } else {
                 sendMessage();
             }
