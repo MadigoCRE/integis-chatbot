@@ -1480,27 +1480,46 @@ async function sendMessage() {
     if (isHelpWithSizeQuery) {
         // User asked for help with sizing but didn't specify a number of people
         const helpMessage = isCzech(inputText)
-            ? "Rád vám pomůžu určit správnou velikost prostoru. Kolik lidí bude prostor využívat? Například: 'Potřebuji prostor pro 30 lidí'"
-            : "I'd be happy to help you determine the right space size. How many people will be using the space? For example: 'I need space for 30 people'";
+            ? "Rád vám pomůžu určit správnou velikost prostoru. Kolik lidí bude prostor využívat?"
+            : "I'd be happy to help you determine the right space size. How many people will be using the space?";
         
         if (document.getElementById('typing-indicator')) {
             document.getElementById('typing-indicator').remove();
         }
         
-        // Add message with suggestions
-        const suggestions = isCzech(inputText)
-            ? ['20 lidí', '50 lidí', '100 lidí', '200 lidí']
-            : ['20 people', '50 people', '100 people', '200 people'];
+        // Add message with size range buttons
+        const sizeRanges = [
+            { range: '0-10', labelCz: '0-10 lidí', labelEn: '0-10 people' },
+            { range: '11-20', labelCz: '11-20 lidí', labelEn: '11-20 people' },
+            { range: '21-50', labelCz: '21-50 lidí', labelEn: '21-50 people' },
+            { range: '51-100', labelCz: '51-100 lidí', labelEn: '51-100 people' },
+            { range: '100+', labelCz: 'Více než 100 lidí', labelEn: 'More than 100 people' }
+        ];
         
-        let suggestionsHTML = `<div class="suggestion-buttons">`;
-        suggestions.forEach(suggestion => {
-            suggestionsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${suggestion}')">
-                ${suggestion}
+        let sizeRangeButtonsHTML = `<div class="suggestion-buttons">`;
+        sizeRanges.forEach(sizeRange => {
+            const label = isCzech(inputText) ? sizeRange.labelCz : sizeRange.labelEn;
+            let peopleCount;
+            
+            if (sizeRange.range === '0-10') {
+                peopleCount = 10; // Use the upper bound
+            } else if (sizeRange.range === '11-20') {
+                peopleCount = 20; // Use the upper bound
+            } else if (sizeRange.range === '21-50') {
+                peopleCount = 50; // Use the upper bound
+            } else if (sizeRange.range === '51-100') {
+                peopleCount = 100; // Use the upper bound
+            } else if (sizeRange.range === '100+') {
+                peopleCount = 150; // Use a reasonable value for 100+
+            }
+            
+            sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountClick(${peopleCount}, '${label}')">
+                ${label}
             </button>`;
         });
-        suggestionsHTML += `</div>`;
+        sizeRangeButtonsHTML += `</div>`;
         
-        addMessage(helpMessage + "<br><br>" + suggestionsHTML, 'bot');
+        addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
         conversationHistory.push({role: "assistant", content: helpMessage});
         return;
     }
@@ -1787,6 +1806,118 @@ function handleSuggestionClick(suggestion) {
     // Submit the form (trigger sendMessage)
     sendMessage();
 }
+
+// Function to handle button clicks
+function handleSuggestionClick(suggestion) {
+    // Add the suggestion text to the input field
+    document.getElementById('user-input').value = suggestion;
+    
+    // Submit the form (trigger sendMessage)
+    sendMessage();
+}
+
+// Function to handle people count button click
+function handlePeopleCountClick(peopleCount, displayText) {
+    // Add the user's selection to the chat
+    addMessage(displayText, 'user');
+    conversationHistory.push({role: "user", content: displayText});
+    
+    // Show typing indicator
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing-indicator';
+    typingIndicator.textContent = 'Typing...';
+    typingIndicator.id = 'typing-indicator';
+    document.getElementById('messages').appendChild(typingIndicator);
+    
+    // Process the people count
+    setTimeout(async () => {
+        try {
+            // Set default type to office if not specified
+            const currentCriteria = conversationState.currentSearchCriteria || {};
+            const spaceType = currentCriteria.type || "office";
+            
+            // Call Gemini API to convert people to sqm
+            const conversionResponse = await callGeminiAPIForPeopleConversion(peopleCount, spaceType);
+            
+            // Create criteria with the size range
+            const criteria = {...currentCriteria};
+            delete criteria.size; // Remove any size if present
+            criteria.minSize = conversionResponse.minSize;
+            criteria.maxSize = conversionResponse.maxSize;
+            
+            // Update conversation state
+            conversationState.currentSearchCriteria = criteria;
+            
+            // Search with the updated criteria
+            const matchedProperties = enhancedSearchProperties(criteria);
+            
+            // Remove typing indicator
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
+            }
+            
+            if (matchedProperties.length > 0) {
+                // Format the explanation with the details from Gemini
+                const isCzechQuery = isCzech(displayText);
+                const conversionExplanation = isCzechQuery
+                    ? `Pro ${peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Zde jsou nemovitosti, které odpovídají těmto požadavkům:`
+                    : `For ${peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Here are the properties that match these requirements:`;
+                
+                // Generate property listings HTML
+                const propertyListingsHTML = generatePropertyListingHTML(matchedProperties, 0, 5);
+                
+                // Add pagination information
+                const paginationHTML = isCzechQuery
+                    ? `<br>Zobrazuji 1-${Math.min(5, matchedProperties.length)} z ${matchedProperties.length} nalezených nemovitostí.${matchedProperties.length > 5 ? '<br><div class="action-button-container"><button class="action-button" onclick="handleShowMore()">Zobrazit další</button></div>' : ''}`
+                    : `<br>Showing 1-${Math.min(5, matchedProperties.length)} of ${matchedProperties.length} matching properties.${matchedProperties.length > 5 ? '<br><div class="action-button-container"><button class="action-button" onclick="handleShowMore()">Show More</button></div>' : ''}`;
+                
+                // Add active filters
+                const filtersHTML = generateActiveFiltersHTML(criteria, isCzechQuery);
+                
+                // Add refinement buttons
+                const refinementHTML = generateRefinementButtonsHTML(criteria, isCzechQuery);
+                
+                // Add suggestion buttons
+                const suggestionHTML = generateSuggestionButtonsHTML(criteria, isCzechQuery);
+                
+                // Combine everything
+                const fullResponse = conversionExplanation + "<br><br>" + propertyListingsHTML + paginationHTML + filtersHTML + refinementHTML + suggestionHTML;
+                
+                // Update last shown properties
+                conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
+                
+                // Display the response
+                addMessage(fullResponse, 'bot');
+                conversationHistory.push({role: "assistant", content: fullResponse});
+            } else {
+                // No matching properties found
+                const isCzechQuery = isCzech(displayText);
+                const noMatchResponse = isCzechQuery
+                    ? `Pro ${peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Bohužel jsem nenašel žádné nemovitosti, které přesně odpovídají těmto parametrům. Zkuste prosím upravit kritéria vyhledávání nebo se podívat na alternativy.`
+                    : `For ${peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Unfortunately, I couldn't find any properties that exactly match these parameters. Please try adjusting your search criteria or looking at alternatives.`;
+                
+                // Display the response
+                addMessage(noMatchResponse, 'bot');
+                conversationHistory.push({role: "assistant", content: noMatchResponse});
+            }
+        } catch (error) {
+            debugLog("Error processing people count:", error.message);
+            
+            // Remove typing indicator
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
+            }
+            
+            // Display error message
+            const errorMessage = isCzech(displayText)
+                ? "Omlouvám se, ale došlo k chybě při zpracování vašeho požadavku. Zkuste prosím zadat počet lidí přímo ve vašem dotazu, například: 'Potřebuji kancelář pro 50 lidí'."
+                : "I'm sorry, but there was an error processing your request. Please try specifying the number of people directly in your query, for example: 'I need an office for 50 people'.";
+            
+            addMessage(errorMessage, 'bot');
+            conversationHistory.push({role: "assistant", content: errorMessage});
+        }
+    }, 1000);
+}     
 
 // Function to handle refinement button clicks
 function handleRefinementClick(refinementType, value) {
@@ -2466,6 +2597,8 @@ window.handleRefinementClick = handleRefinementClick;
 window.handleShowMore = handleShowMore;
 window.startProgressiveConversation = startProgressiveConversation;
 window.handleProgressiveAnswer = handleProgressiveAnswer;
+// Add our new function to the window object so it can be called from onclick
+window.handlePeopleCountClick = handlePeopleCountClick;
 </script>
 </body>
 </html>  
