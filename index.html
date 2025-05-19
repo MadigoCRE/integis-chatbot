@@ -1966,8 +1966,8 @@ function handlePeopleCountClick(peopleCount, displayText) {
 
 // Function to handle "Help me with size" button click from guided search
 function handleSizeHelpFromGuided(spaceType) {
-    // Save the current guided search progress
-    const savedFlow = {...conversationState.progressiveFlow};
+    // Save the current guided search progress to global state for later use
+    window.savedProgressiveFlow = {...conversationState.progressiveFlow};
     
     // Temporarily remove the flow to prevent conflicts
     delete conversationState.progressiveFlow;
@@ -2008,7 +2008,10 @@ function handleSizeHelpFromGuided(spaceType) {
             peopleCount = 150; // Use a reasonable value for 100+
         }
         
-        sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountFromGuided(${peopleCount}, '${label}', '${spaceType}', ${JSON.stringify(savedFlow).replace(/"/g, "'")})">${label}</button>`;
+        // Store the space type in a global variable for reference
+        window.guidedSpaceType = spaceType;
+        
+        sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountFromGuided(${peopleCount}, '${label}')">${label}</button>`;
     });
     sizeRangeButtonsHTML += `</div>`;
     
@@ -2018,9 +2021,17 @@ function handleSizeHelpFromGuided(spaceType) {
 }
 
 // Function to handle people count button click from guided search
-function handlePeopleCountFromGuided(peopleCount, displayText, spaceType, savedFlowString) {
-    // Convert the string back to an object
-    const savedFlow = JSON.parse(savedFlowString.replace(/'/g, '"'));
+function handlePeopleCountFromGuided(peopleCount, displayText) {
+    // Get the saved flow from global state
+    const savedFlow = window.savedProgressiveFlow;
+    const spaceType = window.guidedSpaceType || 'office';
+    
+    if (!savedFlow) {
+        debugLog("Error: No saved guided flow found");
+        // Handle error case - go back to normal flow
+        handlePeopleCountClick(peopleCount, displayText);
+        return;
+    }
     
     // Add the user's selection to the chat
     addMessage(displayText, 'user');
@@ -2085,6 +2096,10 @@ function handlePeopleCountFromGuided(peopleCount, displayText, spaceType, savedF
             savedFlow.currentStep = 2; // Set to the next step after size (availability)
             conversationState.progressiveFlow = savedFlow;
             
+            // Clean up our global variables
+            delete window.savedProgressiveFlow;
+            delete window.guidedSpaceType;
+            
             // Proceed with the next step in guided flow
             setTimeout(() => {
                 handleProgressiveAnswer(sizeValue, sizeDisplay);
@@ -2109,12 +2124,15 @@ function handlePeopleCountFromGuided(peopleCount, displayText, spaceType, savedF
             // Restore the guided flow
             conversationState.progressiveFlow = savedFlow;
             
+            // Clean up our global variables
+            delete window.savedProgressiveFlow;
+            delete window.guidedSpaceType;
+            
             // Go back to the size selection step
             conversationState.progressiveFlow.currentStep = 2;
             
             // Show the size selection options again
             const nextQuestion = conversationState.progressiveFlow.steps[2].question;
-            const isCzechQuery = isCzech(document.getElementById('user-input').value);
             
             // Create buttons without the help option (to avoid loops)
             const buttons = `<div class="suggestion-buttons">
@@ -2758,35 +2776,34 @@ function handleProgressiveAnswer(value, displayText) {
     const nextQuestion = flow.steps[flow.currentStep].question;
     let buttons = '';
     
-    // Add contextual buttons based on the current field
-    if (flow.steps[flow.currentStep].field === 'location') {
-        buttons = `<div class="suggestion-buttons">
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('Prague', 'Prague')">Prague</button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('Brno', 'Brno')">Brno</button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('Ostrava', 'Ostrava')">Ostrava</button>
-        </div>`;
-    } else if (flow.steps[flow.currentStep].field === 'size') {
-        // Add "Help me with size" option to the size selection step
-        const isCzechQuery = isCzech(document.getElementById('user-input').value);
-        buttons = `<div class="suggestion-buttons">
-            <button class="suggestion-button" onclick="handleSizeHelpFromGuided('${flow.answers.type || 'office'}')">
-                ${isCzechQuery ? 'Pomoc s výběrem velikosti' : 'Help me with size'}
-            </button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('up to 100', 'Up to 100 sqm')">Up to 100 sqm</button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('100-300', '100-300 sqm')">100-300 sqm</button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('300-500', '300-500 sqm')">300-500 sqm</button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('500-1000', '500-1000 sqm')">500-1000 sqm</button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('more than 1000', 'More than 1000 sqm')">More than 1000 sqm</button>
-        </div>`;
-    } else if (flow.steps[flow.currentStep].field === 'available') {
-        buttons = `<div class="suggestion-buttons">
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('now', 'Immediately')">Immediately</button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('Q3 2025', 'Q3 2025')">Q3 2025</button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('Q4 2025', 'Q4 2025')">Q4 2025</button>
-            <button class="suggestion-button" onclick="handleProgressiveAnswer('Any', 'Any time')">Any time</button>
-        </div>`;
-    }
-    
+  // Add contextual buttons based on the current field
+if (flow.steps[flow.currentStep].field === 'location') {
+    buttons = `<div class="suggestion-buttons">
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('Prague', 'Prague')">Prague</button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('Brno', 'Brno')">Brno</button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('Ostrava', 'Ostrava')">Ostrava</button>
+    </div>`;
+} else if (flow.steps[flow.currentStep].field === 'size') {
+    // Add "Help me with size" option to the size selection step
+    const isCzechQuery = isCzech(document.getElementById('user-input').value);
+    buttons = `<div class="suggestion-buttons">
+        <button class="suggestion-button" onclick="handleSizeHelpFromGuided('${flow.answers.type || 'office'}')">
+            ${isCzechQuery ? 'Pomoc s výběrem velikosti' : 'Help me with size'}
+        </button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('up to 100', 'Up to 100 sqm')">Up to 100 sqm</button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('100-300', '100-300 sqm')">100-300 sqm</button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('300-500', '300-500 sqm')">300-500 sqm</button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('500-1000', '500-1000 sqm')">500-1000 sqm</button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('more than 1000', 'More than 1000 sqm')">More than 1000 sqm</button>
+    </div>`;
+} else if (flow.steps[flow.currentStep].field === 'available') {
+    buttons = `<div class="suggestion-buttons">
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('now', 'Immediately')">Immediately</button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('Q3 2025', 'Q3 2025')">Q3 2025</button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('Q4 2025', 'Q4 2025')">Q4 2025</button>
+        <button class="suggestion-button" onclick="handleProgressiveAnswer('Any', 'Any time')">Any time</button>
+    </div>`;
+}
     // Update step indicator
     let stepIndicator = '<div class="step-indicator">';
     for (let i = 0; i < flow.steps.length; i++) {
