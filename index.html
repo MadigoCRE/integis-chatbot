@@ -2521,7 +2521,7 @@ function generateRefinementButtonsHTML(criteria, isCzechQuery) {
     
     // NEW ADDITION: Change location button for Prague districts
     if (criteria.location && criteria.location.toLowerCase().includes('prague')) {
-        buttonsHTML += `<button class="refinement-button" onclick="showPragueDistrictOptions()">
+        buttonsHTML += `<button class="refinement-button" onclick="alert('Testing button'); showPragueDistrictOptions()">
             ${isCzechQuery ? 'Změnit lokalitu' : 'Change location'}
         </button>`;
     }
