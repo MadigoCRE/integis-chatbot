@@ -503,7 +503,7 @@
             
             return false;
         }
- // Extract search criteria from user input
+         // Extract search criteria from user input
         function extractSearchCriteria(userInput, previousCriteria = null) {
             debugLog("Extracting search criteria from:", userInput);
             let criteria = previousCriteria ? {...previousCriteria} : {};
@@ -550,8 +550,11 @@
                 criteria.type = "industrial";
             }
             
-            // NEW: Check for people-based sizing
-            const peopleMatch = userInput.match(/(\d+)\s*(?:people|persons|employees|staff|workers|colleagues|team members|osoby|lidí|zaměstnanců|pracovníků)/i);
+            // IMPROVED: Check for people-based sizing with more patterns
+            const peopleMatch = userInput.match(/(\d+)\s*(?:people|persons|employees|staff|workers|colleagues|team members|osoby|lidí|zaměstnanců|pracovníků)/i) ||
+                                userInput.match(/(?:space|office|workspace|property|prostory|kanceláře)\s+for\s+(\d+)/i) || 
+                                userInput.match(/(?:help me size|help with size|pomoc s velikostí).*?(\d+)/i);
+            
             if (peopleMatch) {
                 const numberOfPeople = parseInt(peopleMatch[1]);
                 if (!isNaN(numberOfPeople)) {
@@ -1149,7 +1152,7 @@
                 return noMatchResponse;
             }
         }    
-     // New function to call Gemini API specifically for people to sqm conversion
+        // Enhanced function to call Gemini API specifically for people to sqm conversion
         async function callGeminiAPIForPeopleConversion(peopleCount, spaceType = "office") {
             debugLog("Calling Gemini API to convert people count to sqm");
             
@@ -1162,12 +1165,20 @@
                 - For retail: depends on type but generally 15-40 sqm per staff member
                 - For industrial: typically 25-50 sqm per worker depending on operations
                 
-                For ${peopleCount} people in a ${spaceType} space, provide the minimum and maximum sqm required.
+                For ${peopleCount} people in a ${spaceType} space, provide:
+                1. The minimum and maximum sqm required as a range
+                2. A short explanation about why this amount of space is appropriate
+                3. Additional considerations like meeting rooms, common areas, etc.
                 
-                Format your response EXACTLY as a JSON object with minSize and maxSize properties as numbers only:
-                {"minSize": X, "maxSize": Y}
+                Format your response EXACTLY as a JSON object with these properties:
+                {
+                  "minSize": number,
+                  "maxSize": number,
+                  "explanation": "brief explanation text",
+                  "considerations": "brief additional considerations"
+                }
                 
-                Do not include any explanation, ONLY return the JSON object.
+                Do not include any other text, ONLY return the JSON object.
                 `;
                 
                 // Call the Gemini API
@@ -1185,7 +1196,7 @@
                         ],
                         generationConfig: {
                             temperature: 0.2,  // Lower temperature for more deterministic output
-                            maxOutputTokens: 100
+                            maxOutputTokens: 400
                         }
                     })
                 });
@@ -1210,7 +1221,9 @@
                         if (conversion.minSize && conversion.maxSize) {
                             return {
                                 minSize: Math.round(conversion.minSize),
-                                maxSize: Math.round(conversion.maxSize)
+                                maxSize: Math.round(conversion.maxSize),
+                                explanation: conversion.explanation || "This size range is appropriate based on commercial real estate standards.",
+                                considerations: conversion.considerations || "Consider meeting rooms, break areas, and circulation space."
                             };
                         }
                     } catch (parseError) {
@@ -1220,7 +1233,9 @@
                         if (numbers && numbers.length >= 2) {
                             return {
                                 minSize: Math.round(parseInt(numbers[0])),
-                                maxSize: Math.round(parseInt(numbers[1]))
+                                maxSize: Math.round(parseInt(numbers[1])),
+                                explanation: "This size range is based on industry standards.",
+                                considerations: "Consider additional space for amenities and common areas."
                             };
                         }
                     }
@@ -1241,7 +1256,9 @@
                 
                 return {
                     minSize: fallback.min,
-                    maxSize: fallback.max
+                    maxSize: fallback.max,
+                    explanation: `Based on industry standards, we typically allocate ${fallback.min/peopleCount}-${fallback.max/peopleCount} sqm per person for ${spaceType} space.`,
+                    considerations: `For ${peopleCount} people, consider additional space for meeting rooms, reception areas, and circulation space.`
                 };
             }
         }
@@ -1466,11 +1483,42 @@ ${propertiesText}`;
                 debugLog("Properties not loaded, loading now...");
                 await loadProperties();
             }
-
+        
             // Extract criteria to check for people-based query
             const criteria = extractSearchCriteria(inputText);
             
-            // NEW: If this is a people-based query, use Gemini to convert people to sqm
+            // Check for specific "help me with size" query without a number
+            const isHelpWithSizeQuery = /help me with size|size help|help with sizing|pomoc s velikostí|pomoc s prostorem/i.test(inputText) && !criteria.peopleCount;
+            
+            if (isHelpWithSizeQuery) {
+                // User asked for help with sizing but didn't specify a number of people
+                const helpMessage = isCzech(inputText)
+                    ? "Rád vám pomůžu určit správnou velikost prostoru. Kolik lidí bude prostor využívat? Například: 'Potřebuji prostor pro 30 lidí'"
+                    : "I'd be happy to help you determine the right space size. How many people will be using the space? For example: 'I need space for 30 people'";
+                
+                if (document.getElementById('typing-indicator')) {
+                    document.getElementById('typing-indicator').remove();
+                }
+                
+                // Add message with suggestions
+                const suggestions = isCzech(inputText)
+                    ? ['20 lidí', '50 lidí', '100 lidí', '200 lidí']
+                    : ['20 people', '50 people', '100 people', '200 people'];
+                
+                let suggestionsHTML = `<div class="suggestion-buttons">`;
+                suggestions.forEach(suggestion => {
+                    suggestionsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${suggestion}')">
+                        ${suggestion}
+                    </button>`;
+                });
+                suggestionsHTML += `</div>`;
+                
+                addMessage(helpMessage + "<br><br>" + suggestionsHTML, 'bot');
+                conversationHistory.push({role: "assistant", content: helpMessage});
+                return;
+            }
+            
+            // If this is a people-based query, use Gemini to convert people to sqm
             if (criteria.peopleCount) {
                 try {
                     debugLog("People-based query detected, using Gemini to convert to sqm");
@@ -1497,10 +1545,10 @@ ${propertiesText}`;
                         const matchedProperties = enhancedSearchProperties(criteria);
                         
                         if (matchedProperties.length > 0) {
-                            // Format the explanation
+                            // Format the explanation with the details from Gemini
                             const conversionExplanation = isCzech(inputText)
-                                ? `Pro ${criteria.peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². Našel jsem tyto možnosti:`
-                                : `For ${criteria.peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. Here are the options I found:`;
+                                ? `Pro ${criteria.peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Zde jsou nemovitosti, které odpovídají těmto požadavkům:`
+                                : `For ${criteria.peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Here are the properties that match these requirements:`;
                             
                             // Generate property listings HTML
                             const propertyListingsHTML = generatePropertyListingHTML(matchedProperties, conversationState.offset, 5);
@@ -1533,6 +1581,19 @@ ${propertiesText}`;
                             addMessage(fullResponse, 'bot');
                             conversationHistory.push({role: "assistant", content: fullResponse});
                             return;
+                        } else {
+                            // No matching properties found
+                            const noMatchResponse = isCzech(inputText)
+                                ? `Pro ${criteria.peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Bohužel jsem nenašel žádné nemovitosti, které přesně odpovídají těmto parametrům. Zkuste prosím upravit kritéria vyhledávání nebo se podívat na alternativy.`
+                                : `For ${criteria.peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Unfortunately, I couldn't find any properties that exactly match these parameters. Please try adjusting your search criteria or looking at alternatives.`;
+                            
+                            if (document.getElementById('typing-indicator')) {
+                                document.getElementById('typing-indicator').remove();
+                            }
+                            
+                            addMessage(noMatchResponse, 'bot');
+                            conversationHistory.push({role: "assistant", content: noMatchResponse});
+                            return;
                         }
                     }
                 } catch (error) {
@@ -1540,7 +1601,8 @@ ${propertiesText}`;
                     // Continue with normal flow if there's an error
                 }
             }
-
+        
+            // Rest of the function remains unchanged
             // STRATEGY: First generate a local response that we can fall back to
             const fallbackResponse = generateLocalResponse(inputText);
             debugLog("Generated fallback response");
@@ -2013,11 +2075,18 @@ ${propertiesText}`;
                 <button class="refinement-button" onclick="handleRefinementClick('location', 'Brno')">Brno</button>
                 <button class="refinement-button" onclick="handleRefinementClick('location', 'Ostrava')">Ostrava</button>`;
             } else if (criteria.location === 'Prague' && !criteria.location.includes('Prague ')) {
-                // Add Prague district options
-                buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 1')">Prague 1</button>
+                // Add ALL Prague district options (1-10)
+                buttonsHTML += `
+                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 1')">Prague 1</button>
+                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 2')">Prague 2</button>
+                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 3')">Prague 3</button>
                 <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 4')">Prague 4</button>
                 <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 5')">Prague 5</button>
-                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 8')">Prague 8</button>`;
+                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 6')">Prague 6</button>
+                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 7')">Prague 7</button>
+                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 8')">Prague 8</button>
+                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 9')">Prague 9</button>
+                <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 10')">Prague 10</button>`;
             }
             
             // Availability refinement
@@ -2032,12 +2101,17 @@ ${propertiesText}`;
             return buttonsHTML;
         }
 
-        // Function to generate suggestion buttons HTML - UPDATED
+        // Function to generate suggestion buttons HTML
         function generateSuggestionButtonsHTML(criteria, isCzechQuery) {
             let buttonsHTML = `<div class="suggestion-buttons">
                 <div style="width:100%; margin-bottom:5px; font-size:12px; color:#666;">
                     ${isCzechQuery ? 'Můžete se také zeptat:' : 'You can also ask:'}
                 </div>`;
+            
+            // Add "Help me with size" button as the first option
+            buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? 'Potřebuji pomoc s velikostí pro 50 lidí' : 'Help me size an office for 50 people'}')">
+                ${isCzechQuery ? 'Pomoc s výběrem velikosti' : 'Help me with size'}
+            </button>`;
             
             // Generate relevant suggestions based on current criteria
             if (criteria.type && criteria.location) {
@@ -2080,7 +2154,7 @@ ${propertiesText}`;
                 ];
                 
                 types.forEach(type => {
-                    buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? type.labelCz + ' v ' + criteria.location : type.labelEn + ' in ' + location}')">
+                    buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? type.labelCz + ' v ' + criteria.location : type.labelEn + ' in ' + criteria.location}')">
                         ${isCzechQuery ? type.labelCz + ' v ' + criteria.location : type.labelEn + ' in ' + criteria.location}
                     </button>`;
                 });
@@ -2194,121 +2268,171 @@ ${propertiesText}`;
             }, 500);
         }
 
-        // Function to start a progressive conversation
-        function startProgressiveConversation() {
-            const steps = [
-                { question: 'What type of commercial property are you looking for?', field: 'type' },
-                { question: 'Where would you like the property to be located?', field: 'location' },
-                { question: 'What size range are you interested in (in sqm)?', field: 'size' },
-                { question: 'When do you need the space to be available?', field: 'available' }
-            ];
-            
-            // Store the conversation flow in the state
-            conversationState.progressiveFlow = {
-                steps: steps,
-                currentStep: 0,
-                answers: {}
-            };
-            
-            // Display the first question
-            const firstQuestion = steps[0].question;
-            
-            // Add contextual buttons for the first question
-            let buttons = '';
-            
-            if (steps[0].field === 'type') {
-                buttons = `<div class="suggestion-buttons">
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('office', 'Office space')">Office space</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('retail', 'Retail space')">Retail space</button>
-                    <button class="suggestion-button" onclick="handleProgressiveAnswer('industrial', 'Industrial space')">Industrial space</button>
-                </div>`;
-            }
-            
-            // Display the first question with step indicator
-            let message = `<div class="step-indicator">
-                <div class="step active"></div>
-                <div class="step"></div>
-                <div class="step"></div>
-                <div class="step"></div>
-            </div>
-            <p>${firstQuestion}</p>
-            ${buttons}`;
-            
-            addMessage(message, 'bot');
-            conversationHistory.push({role: "assistant", content: firstQuestion});
-        }
+// Function to start a progressive conversation
+function startProgressiveConversation() {
+    const steps = [
+        { question: 'What type of commercial property are you looking for?', field: 'type' },
+        { question: 'Where would you like the property to be located?', field: 'location' },
+        { question: 'What size range are you interested in (in sqm)?', field: 'size' },
+        { question: 'When do you need the space to be available?', field: 'available' }
+    ];
+    
+    // Store the conversation flow in the state
+    conversationState.progressiveFlow = {
+        steps: steps,
+        currentStep: 0,
+        answers: {}
+    };
+    
+    // Display the first question
+    const firstQuestion = steps[0].question;
+    
+    // Add contextual buttons for the first question
+    let buttons = '';
+    
+    if (steps[0].field === 'type') {
+        buttons = `<div class="suggestion-buttons">
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('office', 'Office space')">Office space</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('retail', 'Retail space')">Retail space</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('industrial', 'Industrial space')">Industrial space</button>
+        </div>`;
+    }
+    
+    // Display the first question with step indicator
+    let message = `<div class="step-indicator">
+        <div class="step active"></div>
+        <div class="step"></div>
+        <div class="step"></div>
+        <div class="step"></div>
+    </div>
+    <p>${firstQuestion}</p>
+    ${buttons}`;
+    
+    addMessage(message, 'bot');
+    conversationHistory.push({role: "assistant", content: firstQuestion});
+}
 
-        // Function to handle progressive answers
-        function handleProgressiveAnswer(value, displayText) {
-            // First, display the user's answer
-            addMessage(displayText, 'user');
-            conversationHistory.push({role: "user", content: displayText});
-            
-            // Get the current flow
-            const flow = conversationState.progressiveFlow;
-            if (!flow) return;
-            
-            // Save the answer
-            const currentField = flow.steps[flow.currentStep].field;
-            flow.answers[currentField] = value;
-            
-            // Move to the next step
-            flow.currentStep++;
-            
-            // Check if we've completed all steps
-            if (flow.currentStep >= flow.steps.length) {
-                // We're done, perform the search with collected criteria
-                const criteria = {
-                    type: flow.answers.type,
-                    location: flow.answers.location
-                };
-                
-                // Handle size (could be a range or single value)
-                if (flow.answers.size && flow.answers.size.includes('-')) {
-                    const [min, max] = flow.answers.size.split('-');
-                    criteria.minSize = min.trim();
-                    criteria.maxSize = max.trim();
-                } else if (flow.answers.size) {
-                    criteria.size = flow.answers.size;
-                }
-                
-                // Handle availability
-                if (flow.answers.available) {
-                    criteria.available = flow.answers.available;
-                }
-                
-                // Update conversation state
-                conversationState.currentSearchCriteria = criteria;
-                
-                // Show typing indicator
-                const typingIndicator = document.createElement('div');
-                typingIndicator.className = 'typing-indicator';
-                typingIndicator.textContent = 'Typing...';
-                typingIndicator.id = 'typing-indicator';
-                document.getElementById('messages').appendChild(typingIndicator);
-                
-                // Short timeout to show the typing indicator
-                setTimeout(() => {
-                    if (document.getElementById('typing-indicator')) {
-                        document.getElementById('typing-indicator').remove();
-                    }
-                    
-                    // Reset the progressive flow
-                    delete conversationState.progressiveFlow;
-                    
-                    // Search for matching properties
-                    const matchedProperties = enhancedSearchProperties(criteria);
-                    
-                    // Display results
-                    displaySearchResults(matchedProperties, criteria);
-                }, 1000);
-                
-                return;
+// Function to handle progressive answers
+function handleProgressiveAnswer(value, displayText) {
+    // First, display the user's answer
+    addMessage(displayText, 'user');
+    conversationHistory.push({role: "user", content: displayText});
+    
+    // Get the current flow
+    const flow = conversationState.progressiveFlow;
+    if (!flow) return;
+    
+    // Save the answer
+    const currentField = flow.steps[flow.currentStep].field;
+    flow.answers[currentField] = value;
+    
+    // Move to the next step
+    flow.currentStep++;
+    
+    // Check if we've completed all steps
+    if (flow.currentStep >= flow.steps.length) {
+        // We're done, perform the search with collected criteria
+        const criteria = {
+            type: flow.answers.type,
+            location: flow.answers.location
+        };
+        
+        // Handle size (could be a range or single value)
+        if (flow.answers.size && flow.answers.size.includes('-')) {
+            const [min, max] = flow.answers.size.split('-');
+            criteria.minSize = min.trim();
+            criteria.maxSize = max.trim();
+        } else if (flow.answers.size === 'up to 100') {
+            criteria.maxSize = '100';
+        } else if (flow.answers.size === 'more than 1000') {
+            criteria.minSize = '1000';
+        } else if (flow.answers.size) {
+            criteria.size = flow.answers.size;
+        }
+        
+        // Handle availability
+        if (flow.answers.available) {
+            criteria.available = flow.answers.available;
+        }
+        
+        // Update conversation state
+        conversationState.currentSearchCriteria = criteria;
+        
+        // Show typing indicator
+        const typingIndicator = document.createElement('div');
+        typingIndicator.className = 'typing-indicator';
+        typingIndicator.textContent = 'Typing...';
+        typingIndicator.id = 'typing-indicator';
+        document.getElementById('messages').appendChild(typingIndicator);
+        
+        // Short timeout to show the typing indicator
+        setTimeout(() => {
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
             }
             
-            // Display the next question
-            const nextQuestion = flow.steps[flow.currentStep].question;
-            let buttons = '';
+            // Reset the progressive flow
+            delete conversationState.progressiveFlow;
+            
+            // Search for matching properties
+            const matchedProperties = enhancedSearchProperties(criteria);
+            
+            // Display results
+            displaySearchResults(matchedProperties, criteria);
+        }, 1000);
+        
+        return;
+    }
+    
+    // Display the next question
+    const nextQuestion = flow.steps[flow.currentStep].question;
+    let buttons = '';
+    
+    // Add contextual buttons based on the current field
+    if (flow.steps[flow.currentStep].field === 'location') {
+        buttons = `<div class="suggestion-buttons">
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('Prague', 'Prague')">Prague</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('Brno', 'Brno')">Brno</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('Ostrava', 'Ostrava')">Ostrava</button>
+        </div>`;
+    } else if (flow.steps[flow.currentStep].field === 'size') {
+        buttons = `<div class="suggestion-buttons">
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('up to 100', 'Up to 100 sqm')">Up to 100 sqm</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('100-300', '100-300 sqm')">100-300 sqm</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('300-500', '300-500 sqm')">300-500 sqm</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('500-1000', '500-1000 sqm')">500-1000 sqm</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('more than 1000', 'More than 1000 sqm')">More than 1000 sqm</button>
+        </div>`;
+    } else if (flow.steps[flow.currentStep].field === 'available') {
+        buttons = `<div class="suggestion-buttons">
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('now', 'Immediately')">Immediately</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('Q3 2025', 'Q3 2025')">Q3 2025</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('Q4 2025', 'Q4 2025')">Q4 2025</button>
+            <button class="suggestion-button" onclick="handleProgressiveAnswer('Any', 'Any time')">Any time</button>
+        </div>`;
+    }
+    
+    // Update step indicator
+    let stepIndicator = '<div class="step-indicator">';
+    for (let i = 0; i < flow.steps.length; i++) {
+        if (i < flow.currentStep) {
+            stepIndicator += '<div class="step" style="background-color: #4caf50;"></div>'; // Completed steps
+        } else if (i === flow.currentStep) {
+            stepIndicator += '<div class="step active"></div>'; // Current step
+        } else {
+            stepIndicator += '<div class="step"></div>'; // Future steps
+        }
+    }
+    stepIndicator += '</div>';
+    
+    // Display the next question
+    let message = `${stepIndicator}
+    <p>${nextQuestion}</p>
+    ${buttons}`;
+    
+    addMessage(message, 'bot');
+    conversationHistory.push({role: "assistant", content: nextQuestion});
+}
             
             // Add contextual buttons based on the current field
             if (flow.steps[flow.currentStep].field === 'location') {
