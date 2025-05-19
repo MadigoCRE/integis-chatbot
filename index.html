@@ -2365,8 +2365,7 @@ function displaySearchResults(matchedProperties, criteria) {
             // Add refinement buttons
             response += generateRefinementButtonsHTML(criteria, isCzechQuery);
             
-            // Add suggestion buttons for common follow-ups
-            response += generateSuggestionButtonsHTML(criteria, isCzechQuery);
+            // REMOVED: "You can also ask:" section with suggestion buttons
             
             // Update last shown properties
             conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
