@@ -2506,10 +2506,12 @@ function generateRefinementButtonsHTML(criteria, isCzechQuery) {
     if (!criteria.minSize && !criteria.maxSize) {
         // Add some standard size options if no size filter applied yet
         const sizes = [
+            { max: 100 },
             { min: 100, max: 300 },
             { min: 300, max: 500 },
             { min: 500, max: 1000 },
             { min: 1000, max: 2000 }
+            { min: 2000 }
         ];
         
         sizes.forEach(size => {
