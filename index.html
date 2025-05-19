@@ -1959,6 +1959,201 @@ function handlePeopleCountClick(peopleCount, displayText) {
     }, 1000);
 }     
 
+// Function to handle people count button click
+function handlePeopleCountClick(peopleCount, displayText) {
+    // Function code...
+}
+
+// Function to handle "Help me with size" button click from guided search
+function handleSizeHelpFromGuided(spaceType) {
+    // Save the current guided search progress
+    const savedFlow = {...conversationState.progressiveFlow};
+    
+    // Temporarily remove the flow to prevent conflicts
+    delete conversationState.progressiveFlow;
+    
+    // User asked for help with sizing
+    const isCzechQuery = isCzech(document.getElementById('user-input').value);
+    const helpMessage = isCzechQuery
+        ? "Rád vám pomůžu určit správnou velikost prostoru. Kolik lidí bude prostor využívat?"
+        : "I'd be happy to help you determine the right space size. How many people will be using the space?";
+    
+    // Add the "Help me with size" message to the chat as if the user had asked it
+    addMessage(isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size", 'user');
+    conversationHistory.push({role: "user", content: isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size"});
+    
+    // Add size range buttons
+    const sizeRanges = [
+        { range: '0-10', labelCz: '0-10 lidí', labelEn: '0-10 people' },
+        { range: '11-20', labelCz: '11-20 lidí', labelEn: '11-20 people' },
+        { range: '21-50', labelCz: '21-50 lidí', labelEn: '21-50 people' },
+        { range: '51-100', labelCz: '51-100 lidí', labelEn: '51-100 people' },
+        { range: '100+', labelCz: 'Více než 100 lidí', labelEn: 'More than 100 people' }
+    ];
+    
+    let sizeRangeButtonsHTML = `<div class="suggestion-buttons">`;
+    sizeRanges.forEach(sizeRange => {
+        const label = isCzechQuery ? sizeRange.labelCz : sizeRange.labelEn;
+        let peopleCount;
+        
+        if (sizeRange.range === '0-10') {
+            peopleCount = 10; // Use the upper bound
+        } else if (sizeRange.range === '11-20') {
+            peopleCount = 20; // Use the upper bound
+        } else if (sizeRange.range === '21-50') {
+            peopleCount = 50; // Use the upper bound
+        } else if (sizeRange.range === '51-100') {
+            peopleCount = 100; // Use the upper bound
+        } else if (sizeRange.range === '100+') {
+            peopleCount = 150; // Use a reasonable value for 100+
+        }
+        
+        sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountFromGuided(${peopleCount}, '${label}', '${spaceType}', ${JSON.stringify(savedFlow).replace(/"/g, "'")})">${label}</button>`;
+    });
+    sizeRangeButtonsHTML += `</div>`;
+    
+    // Display the help message with size range buttons
+    addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
+    conversationHistory.push({role: "assistant", content: helpMessage});
+}
+
+// Function to handle people count button click from guided search
+function handlePeopleCountFromGuided(peopleCount, displayText, spaceType, savedFlowString) {
+    // Convert the string back to an object
+    const savedFlow = JSON.parse(savedFlowString.replace(/'/g, '"'));
+    
+    // Add the user's selection to the chat
+    addMessage(displayText, 'user');
+    conversationHistory.push({role: "user", content: displayText});
+    
+    // Show typing indicator
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing-indicator';
+    typingIndicator.textContent = 'Typing...';
+    typingIndicator.id = 'typing-indicator';
+    document.getElementById('messages').appendChild(typingIndicator);
+    
+    // Process the people count
+    setTimeout(async () => {
+        try {
+            // Call Gemini API to convert people to sqm
+            const conversionResponse = await callGeminiAPIForPeopleConversion(peopleCount, spaceType);
+            
+            // Get the size range 
+            const minSize = conversionResponse.minSize;
+            const maxSize = conversionResponse.maxSize;
+            
+            // Remove typing indicator
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
+            }
+            
+            // Format the explanation with the details from Gemini
+            const isCzechQuery = isCzech(displayText);
+            const conversionExplanation = isCzechQuery
+                ? `Pro ${peopleCount} osob byste potřebovali přibližně ${minSize}-${maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}`
+                : `For ${peopleCount} people, you would need approximately ${minSize}-${maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}`;
+            
+            // Display the explanation
+            addMessage(conversionExplanation, 'bot');
+            conversationHistory.push({role: "assistant", content: conversionExplanation});
+            
+            // Determine which size range option to use
+            let sizeValue, sizeDisplay;
+            
+            if (maxSize <= 100) {
+                sizeValue = 'up to 100';
+                sizeDisplay = 'Up to 100 sqm';
+            } else if (minSize >= 1000) {
+                sizeValue = 'more than 1000';
+                sizeDisplay = 'More than 1000 sqm';
+            } else if (minSize >= 500) {
+                sizeValue = '500-1000';
+                sizeDisplay = '500-1000 sqm';
+            } else if (minSize >= 300) {
+                sizeValue = '300-500';
+                sizeDisplay = '300-500 sqm';
+            } else {
+                sizeValue = '100-300';
+                sizeDisplay = '100-300 sqm';
+            }
+            
+            // Restore the guided flow with the new size
+            savedFlow.answers.size = sizeValue;
+            
+            // Continue the guided flow from the size step
+            savedFlow.currentStep = 2; // Set to the next step after size (availability)
+            conversationState.progressiveFlow = savedFlow;
+            
+            // Proceed with the next step in guided flow
+            setTimeout(() => {
+                handleProgressiveAnswer(sizeValue, sizeDisplay);
+            }, 1000);
+            
+        } catch (error) {
+            debugLog("Error processing people count from guided flow:", error.message);
+            
+            // Remove typing indicator
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
+            }
+            
+            // Display error message
+            const errorMessage = isCzech(displayText)
+                ? "Omlouvám se, ale došlo k chybě při zpracování vašeho požadavku. Zkusíme to jinak. Jakou velikost prostoru byste preferovali?"
+                : "I'm sorry, but there was an error processing your request. Let's try a different approach. What size space would you prefer?";
+            
+            addMessage(errorMessage, 'bot');
+            conversationHistory.push({role: "assistant", content: errorMessage});
+            
+            // Restore the guided flow
+            conversationState.progressiveFlow = savedFlow;
+            
+            // Go back to the size selection step
+            conversationState.progressiveFlow.currentStep = 2;
+            
+            // Show the size selection options again
+            const nextQuestion = conversationState.progressiveFlow.steps[2].question;
+            const isCzechQuery = isCzech(document.getElementById('user-input').value);
+            
+            // Create buttons without the help option (to avoid loops)
+            const buttons = `<div class="suggestion-buttons">
+                <button class="suggestion-button" onclick="handleProgressiveAnswer('up to 100', 'Up to 100 sqm')">Up to 100 sqm</button>
+                <button class="suggestion-button" onclick="handleProgressiveAnswer('100-300', '100-300 sqm')">100-300 sqm</button>
+                <button class="suggestion-button" onclick="handleProgressiveAnswer('300-500', '300-500 sqm')">300-500 sqm</button>
+                <button class="suggestion-button" onclick="handleProgressiveAnswer('500-1000', '500-1000 sqm')">500-1000 sqm</button>
+                <button class="suggestion-button" onclick="handleProgressiveAnswer('more than 1000', 'More than 1000 sqm')">More than 1000 sqm</button>
+            </div>`;
+            
+            // Update step indicator
+            let stepIndicator = '<div class="step-indicator">';
+            for (let i = 0; i < conversationState.progressiveFlow.steps.length; i++) {
+                if (i < 2) { // First two steps completed
+                    stepIndicator += '<div class="step" style="background-color: #4caf50;"></div>';
+                } else if (i === 2) { // Size step is active
+                    stepIndicator += '<div class="step active"></div>';
+                } else {
+                    stepIndicator += '<div class="step"></div>';
+                }
+            }
+            stepIndicator += '</div>';
+            
+            // Display the size question again
+            let message = `${stepIndicator}
+            <p>${nextQuestion}</p>
+            ${buttons}`;
+            
+            addMessage(message, 'bot');
+            conversationHistory.push({role: "assistant", content: nextQuestion});
+        }
+    }, 1000);
+}
+
+// Function to handle refinement button clicks
+function handleRefinementClick(refinementType, value) {
+    // Function code...
+}    
+     
 // Function to handle refinement button clicks
 function handleRefinementClick(refinementType, value) {
     // Get current criteria
@@ -2576,7 +2771,12 @@ function handleProgressiveAnswer(value, displayText) {
             <button class="suggestion-button" onclick="handleProgressiveAnswer('Ostrava', 'Ostrava')">Ostrava</button>
         </div>`;
     } else if (flow.steps[flow.currentStep].field === 'size') {
+        // Add "Help me with size" option to the size selection step
+        const isCzechQuery = isCzech(document.getElementById('user-input').value);
         buttons = `<div class="suggestion-buttons">
+            <button class="suggestion-button" onclick="handleSizeHelpFromGuided('${flow.answers.type || 'office'}')">
+                ${isCzechQuery ? 'Pomoc s výběrem velikosti' : 'Help me with size'}
+            </button>
             <button class="suggestion-button" onclick="handleProgressiveAnswer('up to 100', 'Up to 100 sqm')">Up to 100 sqm</button>
             <button class="suggestion-button" onclick="handleProgressiveAnswer('100-300', '100-300 sqm')">100-300 sqm</button>
             <button class="suggestion-button" onclick="handleProgressiveAnswer('300-500', '300-500 sqm')">300-500 sqm</button>
@@ -2633,7 +2833,9 @@ document.addEventListener('click', function(e) {
 
 // Add handleSuggestionClick and other functions to window so they can be called from onclick
 window.handleSuggestionClick = handleSuggestionClick;
-window.handleSizeHelpClick = handleSizeHelpClick; // Add this line
+window.handleSizeHelpClick = handleSizeHelpClick;
+window.handleSizeHelpFromGuided = handleSizeHelpFromGuided;
+window.handlePeopleCountFromGuided = handlePeopleCountFromGuided;
 window.handleRefinementClick = handleRefinementClick;
 window.handleShowMore = handleShowMore;
 window.startProgressiveConversation = startProgressiveConversation;
