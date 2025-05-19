@@ -1805,7 +1805,7 @@ function handleSuggestionClick(suggestion) {
     
     // Submit the form (trigger sendMessage)
     sendMessage();
-}
+}    
 
 // Function to handle button clicks
 function handleSuggestionClick(suggestion) {
@@ -1815,7 +1815,64 @@ function handleSuggestionClick(suggestion) {
     // Submit the form (trigger sendMessage)
     sendMessage();
 }
+// Function to handle button clicks
+function handleSuggestionClick(suggestion) {
+    // Add the suggestion text to the input field
+    document.getElementById('user-input').value = suggestion;
+    
+    // Submit the form (trigger sendMessage)
+    sendMessage();
+}
 
+// Function to handle "Help me with size" button click
+function handleSizeHelpClick() {
+    // User asked for help with sizing
+    const isCzechQuery = isCzech(document.getElementById('user-input').value);
+    const helpMessage = isCzechQuery
+        ? "Rád vám pomůžu určit správnou velikost prostoru. Kolik lidí bude prostor využívat?"
+        : "I'd be happy to help you determine the right space size. How many people will be using the space?";
+    
+    // Add the "Help me with size" message to the chat as if the user had asked it
+    addMessage(isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size", 'user');
+    conversationHistory.push({role: "user", content: isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size"});
+    
+    // Add size range buttons
+    const sizeRanges = [
+        { range: '0-10', labelCz: '0-10 lidí', labelEn: '0-10 people' },
+        { range: '11-20', labelCz: '11-20 lidí', labelEn: '11-20 people' },
+        { range: '21-50', labelCz: '21-50 lidí', labelEn: '21-50 people' },
+        { range: '51-100', labelCz: '51-100 lidí', labelEn: '51-100 people' },
+        { range: '100+', labelCz: 'Více než 100 lidí', labelEn: 'More than 100 people' }
+    ];
+    
+    let sizeRangeButtonsHTML = `<div class="suggestion-buttons">`;
+    sizeRanges.forEach(sizeRange => {
+        const label = isCzechQuery ? sizeRange.labelCz : sizeRange.labelEn;
+        let peopleCount;
+        
+        if (sizeRange.range === '0-10') {
+            peopleCount = 10; // Use the upper bound
+        } else if (sizeRange.range === '11-20') {
+            peopleCount = 20; // Use the upper bound
+        } else if (sizeRange.range === '21-50') {
+            peopleCount = 50; // Use the upper bound
+        } else if (sizeRange.range === '51-100') {
+            peopleCount = 100; // Use the upper bound
+        } else if (sizeRange.range === '100+') {
+            peopleCount = 150; // Use a reasonable value for 100+
+        }
+        
+        sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountClick(${peopleCount}, '${label}')">
+            ${label}
+        </button>`;
+    });
+    sizeRangeButtonsHTML += `</div>`;
+    
+    // Display the help message with size range buttons
+    addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
+    conversationHistory.push({role: "assistant", content: helpMessage});
+}
+     
 // Function to handle people count button click
 function handlePeopleCountClick(peopleCount, displayText) {
     // Add the user's selection to the chat
@@ -2248,8 +2305,8 @@ function generateSuggestionButtonsHTML(criteria, isCzechQuery) {
             ${isCzechQuery ? 'Můžete se také zeptat:' : 'You can also ask:'}
         </div>`;
     
-    // Add "Help me with size" button as the first option
-    buttonsHTML += `<button class="suggestion-button" onclick="handleSuggestionClick('${isCzechQuery ? 'Potřebuji pomoc s velikostí pro 50 lidí' : 'Help me size an office for 50 people'}')">
+    // Add "Help me with size" button as the first option - USING DIRECT HANDLER
+    buttonsHTML += `<button class="suggestion-button" onclick="handleSizeHelpClick()">
         ${isCzechQuery ? 'Pomoc s výběrem velikosti' : 'Help me with size'}
     </button>`;
     
@@ -2593,11 +2650,11 @@ document.addEventListener('click', function(e) {
 
 // Add handleSuggestionClick and other functions to window so they can be called from onclick
 window.handleSuggestionClick = handleSuggestionClick;
+window.handleSizeHelpClick = handleSizeHelpClick; // Add this line
 window.handleRefinementClick = handleRefinementClick;
 window.handleShowMore = handleShowMore;
 window.startProgressiveConversation = startProgressiveConversation;
 window.handleProgressiveAnswer = handleProgressiveAnswer;
-// Add our new function to the window object so it can be called from onclick
 window.handlePeopleCountClick = handlePeopleCountClick;
 </script>
 </body>
