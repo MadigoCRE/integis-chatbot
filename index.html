@@ -2502,21 +2502,32 @@ function generateRefinementButtonsHTML(criteria, isCzechQuery) {
             ${isCzechQuery ? 'Upřesnit vyhledávání:' : 'Refine your search:'}
         </div>`;
     
-    // Size refinements
+    // Size refinements - UPDATED to match the guided search
     if (!criteria.minSize && !criteria.maxSize) {
-        // Add some standard size options if no size filter applied yet
-        const sizes = [
-            { min: 100, max: 300 },
-            { min: 300, max: 500 },
-            { min: 500, max: 1000 },
-            { min: 1000, max: 2000 }
-        ];
-        
-        sizes.forEach(size => {
-            buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('minSize', ${size.min}); handleRefinementClick('maxSize', ${size.max});">
-                ${size.min}-${size.max} ${isCzechQuery ? 'm²' : 'sqm'}
-            </button>`;
-        });
+        // Add size options that match the guided search
+        buttonsHTML += `<button class="refinement-button" onclick="handleSizeHelpClick()">
+            ${isCzechQuery ? 'Pomoc s výběrem velikosti' : 'Help me with size'}
+        </button>`;
+            
+        buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('maxSize', '100')">
+            ${isCzechQuery ? 'Do 100 m²' : 'Up to 100 sqm'}
+        </button>`;
+            
+        buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('minSize', '100'); handleRefinementClick('maxSize', '300');">
+            ${isCzechQuery ? '100-300 m²' : '100-300 sqm'}
+        </button>`;
+            
+        buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('minSize', '300'); handleRefinementClick('maxSize', '500');">
+            ${isCzechQuery ? '300-500 m²' : '300-500 sqm'}
+        </button>`;
+            
+        buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('minSize', '500'); handleRefinementClick('maxSize', '1000');">
+            ${isCzechQuery ? '500-1000 m²' : '500-1000 sqm'}
+        </button>`;
+            
+        buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('minSize', '1000')">
+            ${isCzechQuery ? 'Více než 1000 m²' : 'More than 1000 sqm'}
+        </button>`;
     } else {
         // Option to clear size filter if one is applied
         buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('clearSize', '')">
