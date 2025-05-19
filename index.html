@@ -812,58 +812,59 @@ function enhancedSearchProperties(criteria) {
         debugLog(`After exclusion filter: ${results.length} properties remaining`);
     }
     
-    // If no results and we have size criteria, try with more relaxed constraints
-    if (results.length === 0 && (criteria.size || criteria.minSize || criteria.maxSize)) {
-        debugLog("No results with strict criteria, trying with relaxed constraints");
-        
-        // Save original results count for later
-        const originalResultsCount = results.length;
-        
-        // Reset results
-        results = [...properties];
-        
-        // Reapply non-size filters
-        if (criteria.type) {
-            const typeKeywords = criteria.type.toLowerCase().split(/\s+/);
-            results = results.filter(p => {
-                if (!p.type) return false;
-                const propertyType = p.type.toLowerCase();
-                return typeKeywords.some(keyword => propertyType.includes(keyword));
-            });
-        }
-        
-        // Reapply location filters (with special handling for Prague districts)
-        if (criteria.location) {
-            if (criteria.location.toLowerCase().includes('prague')) {
-                // Handle Prague district special case again
-                const pragueDistrictMatch = criteria.location.match(/prague\s*(\d+)/i);
-                if (pragueDistrictMatch && pragueDistrictMatch[1]) {
-                    // We found a Prague district, but let's be more lenient
-                    results = results.filter(p => {
-                        return (p.city && p.city.toLowerCase().includes('prague')) || 
-                              (p.location && p.location.toLowerCase().includes('prague'));
-                    });
-                } else {
-                    results = results.filter(p => {
-                        return (p.city && p.city.toLowerCase().includes('prague')) || 
-                              (p.location && p.location.toLowerCase().includes('prague'));
-                    });
-                }
-            } else {
-                const locationKeywords = criteria.location.toLowerCase().split(/\s+/);
+// If no results and we have size criteria, try with more relaxed constraints
+if (results.length === 0 && (criteria.size || criteria.minSize || criteria.maxSize)) {
+    debugLog("No results with strict criteria, trying with relaxed constraints");
+    
+    // Save original results count for later
+    const originalResultsCount = results.length;
+    
+    // Reset results
+    results = [...properties];
+    
+    // Reapply non-size filters - KEEP PRAGUE DISTRICT FILTER STRICT
+    if (criteria.type) {
+        // Type filter remains the same...
+    }
+    
+    // IMPORTANT: Preserve the Prague district filter even in relaxed mode
+    if (criteria.location) {
+        if (criteria.location.toLowerCase().includes('prague')) {
+            // Handle Prague district special case - KEEP STRICT
+            const pragueDistrictMatch = criteria.location.match(/prague\s*(\d+)/i);
+            if (pragueDistrictMatch && pragueDistrictMatch[1]) {
+                // We found a Prague district, DO NOT RELAX this constraint
+                const districtNum = pragueDistrictMatch[1];
                 results = results.filter(p => {
-                    const propertyLocation = (p.location || "").toLowerCase();
-                    const propertyCity = (p.city || "").toLowerCase();
-                    const propertyDistrict = (p.district || "").toLowerCase();
+                    // Look for district in district field
+                    if (p.district) {
+                        const propertyDistrictMatch = p.district.match(/(\d+)/);
+                        if (propertyDistrictMatch && propertyDistrictMatch[1] === districtNum) {
+                            return true;
+                        }
+                    }
                     
-                    return locationKeywords.some(keyword => 
-                        propertyLocation.includes(keyword) || 
-                        propertyCity.includes(keyword) || 
-                        propertyDistrict.includes(keyword)
-                    );
+                    // Also check location field
+                    if (p.location) {
+                        const locationDistrictMatch = p.location.match(/prague\s*(\d+)/i);
+                        if (locationDistrictMatch && locationDistrictMatch[1] === districtNum) {
+                            return true;
+                        }
+                    }
+                    
+                    return false;
+                });
+            } else {
+                // Just "Prague" with no district, keep as is
+                results = results.filter(p => {
+                    return (p.city && p.city.toLowerCase().includes('prague')) || 
+                          (p.location && p.location.toLowerCase().includes('prague'));
                 });
             }
+        } else {
+            // Non-Prague location filter remains the same...
         }
+    }
         
         // Apply more relaxed size constraints (40% instead of 20%)
         if (criteria.size) {
@@ -901,8 +902,8 @@ function enhancedSearchProperties(criteria) {
             }
         }
         
-        debugLog(`After relaxed criteria: ${results.length} properties remaining (was ${originalResultsCount})`);
-    }
+        debugLog(`After relaxed criteria with preserved district filter: ${results.length} properties remaining (was ${originalResultsCount})`);
+}
     
     debugLog(`Final search results: ${results.length} properties`);
     return results;
