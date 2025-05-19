@@ -795,16 +795,18 @@ function enhancedSearchProperties(criteria) {
         }
     }
     
-    // Filter by availability
-    if (criteria.available) {
-        const availableKeywords = criteria.available.toLowerCase().split(/\s+/);
-        results = results.filter(p => {
-            if (!p.available) return false;
-            const propertyAvailable = p.available.toLowerCase();
-            return availableKeywords.some(keyword => propertyAvailable.includes(keyword));
-        });
-        debugLog(`After availability filter: ${results.length} properties remaining`);
-    }
+   // Filter by availability - ONLY if not "Any"
+if (criteria.available && criteria.available.toLowerCase() !== 'any') {
+    const availableKeywords = criteria.available.toLowerCase().split(/\s+/);
+    results = results.filter(p => {
+        if (!p.available) return false;
+        const propertyAvailable = p.available.toLowerCase();
+        return availableKeywords.some(keyword => propertyAvailable.includes(keyword));
+    });
+    debugLog(`After availability filter: ${results.length} properties remaining`);
+} else {
+    debugLog("Availability filter skipped (set to 'Any' or not specified)");
+}
     
     // Exclude specific properties if needed
     if (criteria.excludeNames && criteria.excludeNames.length > 0) {
@@ -824,7 +826,12 @@ if (results.length === 0 && (criteria.size || criteria.minSize || criteria.maxSi
     
     // Reapply non-size filters - KEEP PRAGUE DISTRICT FILTER STRICT
     if (criteria.type) {
-        // Type filter remains the same...
+        const typeKeywords = criteria.type.toLowerCase().split(/\s+/);
+        results = results.filter(p => {
+            if (!p.type) return false;
+            const propertyType = p.type.toLowerCase();
+            return typeKeywords.some(keyword => propertyType.includes(keyword));
+        });
     }
     
     // IMPORTANT: Preserve the Prague district filter even in relaxed mode
@@ -862,12 +869,23 @@ if (results.length === 0 && (criteria.size || criteria.minSize || criteria.maxSi
                 });
             }
         } else {
-            // Non-Prague location filter remains the same...
+            const locationKeywords = criteria.location.toLowerCase().split(/\s+/);
+            results = results.filter(p => {
+                const propertyLocation = (p.location || "").toLowerCase();
+                const propertyCity = (p.city || "").toLowerCase();
+                const propertyDistrict = (p.district || "").toLowerCase();
+                
+                return locationKeywords.some(keyword => 
+                    propertyLocation.includes(keyword) || 
+                    propertyCity.includes(keyword) || 
+                    propertyDistrict.includes(keyword)
+                );
+            });
         }
     }
-        
-        // Apply more relaxed size constraints (40% instead of 20%)
-        if (criteria.size) {
+    
+    // Apply more relaxed size constraints (40% instead of 20%)
+    if (criteria.size) {
             const targetSize = parseInt(criteria.size);
             if (!isNaN(targetSize)) {
                 const minSize = targetSize * 0.6;
@@ -902,7 +920,7 @@ if (results.length === 0 && (criteria.size || criteria.minSize || criteria.maxSi
             }
         }
         
-        debugLog(`After relaxed criteria with preserved district filter: ${results.length} properties remaining (was ${originalResultsCount})`);
+       debugLog(`After relaxed criteria with preserved district filter: ${results.length} properties remaining (was ${originalResultsCount})`);
 }
     
     debugLog(`Final search results: ${results.length} properties`);
@@ -2173,6 +2191,9 @@ function handleRefinementClick(refinementType, value) {
     // Get current criteria
     let criteria = {...conversationState.currentSearchCriteria} || {};
     
+    // Log the criteria before any changes
+    debugLog("Current criteria before refinement:", JSON.stringify(criteria));
+    
     // Update criteria based on refinement type
     switch (refinementType) {
         case 'minSize':
@@ -2191,13 +2212,26 @@ function handleRefinementClick(refinementType, value) {
             criteria.available = value;
             break;
         case 'clearSize':
-            delete criteria.size;
-            delete criteria.minSize;
-            delete criteria.maxSize;
-            break;
+    // Log the criteria before clearing size
+    debugLog("Criteria before clearing size:", JSON.stringify(criteria));
+    
+    // Remove all size-related fields
+    delete criteria.size;
+    delete criteria.minSize;
+    delete criteria.maxSize;
+    
+    // Set a flag to indicate we just cleared size restrictions
+    criteria.clearSizeAction = true;
+    
+    // Log after clearing
+    debugLog("Criteria after clearing size:", JSON.stringify(criteria));
+    break;
         default:
             break;
     }
+    
+    // Reset pagination offset
+    conversationState.offset = 0;
     
     // Update conversation state
     conversationState.currentSearchCriteria = criteria;
@@ -2214,8 +2248,14 @@ function handleRefinementClick(refinementType, value) {
     addMessage(refinementText, 'user');
     conversationHistory.push({role: "user", content: refinementText});
     
+    // Log the final criteria we're searching with
+    debugLog("About to search with these criteria:", JSON.stringify(criteria));
+    
     // Trigger a new search with updated criteria
     const searchResults = enhancedSearchProperties(criteria);
+    
+    // Log the search results count
+    debugLog(`Search returned ${searchResults.length} results for ${criteria.location} with type ${criteria.type}`);
     
     // Generate and show results
     displaySearchResults(searchResults, criteria);
@@ -2256,6 +2296,10 @@ function getReadableCriteria(type, value, isCzechLanguage) {
 
 // Function to display search results
 function displaySearchResults(matchedProperties, criteria) {
+    // Add detailed logging about the criteria and results
+    debugLog("Displaying search results for criteria:", JSON.stringify(criteria));
+    debugLog(`Found ${matchedProperties.length} matching properties`);
+    
     // Show typing indicator
     const typingIndicator = document.createElement('div');
     typingIndicator.className = 'typing-indicator';
@@ -2274,11 +2318,27 @@ function displaySearchResults(matchedProperties, criteria) {
         
         // Check if we have results
         if (matchedProperties.length > 0) {
+            debugLog("Displaying positive search results");
+            
             // Generate introduction text
             const isCzechQuery = isCzech(document.getElementById('user-input').value);
-            let response = isCzechQuery 
-                ? `Našel jsem ${matchedProperties.length} nemovitostí s těmito parametry:<br><br>`
-                : `I found ${matchedProperties.length} properties with these parameters:<br><br>`;
+            
+            // Provide more contextual responses based on filter changes
+            let response = "";
+            
+            // If we just cleared size restrictions, mention it specifically
+            if (criteria.clearSizeAction) {
+                response = isCzechQuery 
+                    ? `Po odstranění filtru velikosti jsem našel ${matchedProperties.length} nemovitostí s těmito parametry:<br><br>`
+                    : `After removing size restrictions, I found ${matchedProperties.length} properties with these parameters:<br><br>`;
+                
+                // Remove the flag after using it
+                delete criteria.clearSizeAction;
+            } else {
+                response = isCzechQuery 
+                    ? `Našel jsem ${matchedProperties.length} nemovitostí s těmito parametry:<br><br>`
+                    : `I found ${matchedProperties.length} properties with these parameters:<br><br>`;
+            }
             
             // Add active filters section
             response += generateActiveFiltersHTML(criteria, isCzechQuery);
@@ -2315,6 +2375,20 @@ function displaySearchResults(matchedProperties, criteria) {
             addMessage(response, 'bot');
             conversationHistory.push({role: "assistant", content: response});
         } else {
+            debugLog("No matching properties found, showing suggestions");
+            
+            // Add logging to help diagnose which filters might be causing the issue
+            debugLog("Current criteria causing no results:", JSON.stringify(criteria));
+            if (criteria.type) debugLog("Has type filter:", criteria.type);
+            if (criteria.location) debugLog("Has location filter:", criteria.location);
+            if (criteria.size || criteria.minSize || criteria.maxSize) {
+                debugLog("Has size filters:", 
+                    criteria.size ? `size=${criteria.size}` : '', 
+                    criteria.minSize ? `minSize=${criteria.minSize}` : '', 
+                    criteria.maxSize ? `maxSize=${criteria.maxSize}` : '');
+            }
+            if (criteria.available) debugLog("Has availability filter:", criteria.available);
+            
             // No results found
             const isCzechQuery = isCzech(document.getElementById('user-input').value);
             let noResultsResponse = isCzechQuery
@@ -2324,7 +2398,7 @@ function displaySearchResults(matchedProperties, criteria) {
             // Add active filters section
             noResultsResponse += generateActiveFiltersHTML(criteria, isCzechQuery);
             
-            // Add suggestion to modify search
+            // Add suggestion to modify search with more targeted recommendations
             noResultsResponse += isCzechQuery
                 ? `<p>Zkuste upravit vyhledávací kritéria pro více výsledků:</p>`
                 : `<p>Try modifying your search criteria for more results:</p>`;
@@ -2332,8 +2406,14 @@ function displaySearchResults(matchedProperties, criteria) {
             // Add buttons to relax search criteria
             noResultsResponse += `<div class="suggestion-buttons">`;
             
+            // Suggest clearing size filters if they exist
             if (criteria.minSize || criteria.maxSize || criteria.size) {
                 noResultsResponse += `<button class="suggestion-button" onclick="handleRefinementClick('clearSize', '')">${isCzechQuery ? 'Odstranit omezení velikosti' : 'Remove size restrictions'}</button>`;
+            }
+            
+            // If availability is set to something other than "Any", suggest changing it
+            if (criteria.available && criteria.available.toLowerCase() !== 'any') {
+                noResultsResponse += `<button class="suggestion-button" onclick="handleRefinementClick('available', 'Any')">${isCzechQuery ? 'Jakákoli dostupnost' : 'Any availability'}</button>`;
             }
             
             // More buttons to try different locations or types
@@ -2365,7 +2445,6 @@ function displaySearchResults(matchedProperties, criteria) {
         }
     }, 500);
 }
-
 // Function to generate active filters HTML
 function generateActiveFiltersHTML(criteria, isCzechQuery) {
     let filtersHTML = '';
