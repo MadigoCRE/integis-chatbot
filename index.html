@@ -1144,8 +1144,6 @@ function generateLocalResponse(userInput) {
         // Add refinement buttons
         response += generateRefinementButtonsHTML(criteria, isCzechQuery);
         
-        // Add suggestion buttons
-        response += generateSuggestionButtonsHTML(criteria, isCzechQuery);
         
         return response;
     } else {
@@ -1936,11 +1934,8 @@ function handlePeopleCountClick(peopleCount, displayText) {
                 // Add refinement buttons
                 const refinementHTML = generateRefinementButtonsHTML(criteria, isCzechQuery);
                 
-                // Add suggestion buttons
-                const suggestionHTML = generateSuggestionButtonsHTML(criteria, isCzechQuery);
-                
                 // Combine everything
-                const fullResponse = conversionExplanation + "<br><br>" + propertyListingsHTML + paginationHTML + filtersHTML + refinementHTML + suggestionHTML;
+                const fullResponse = conversionExplanation + "<br><br>" + propertyListingsHTML + paginationHTML + filtersHTML + refinementHTML;
                 
                 // Update last shown properties
                 conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
