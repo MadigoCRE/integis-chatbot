@@ -2800,6 +2800,46 @@ function startProgressiveConversation() {
     conversationHistory.push({role: "assistant", content: firstQuestion});
 }
 
+// Function to show Prague district options when "Change location" is clicked
+function showPragueDistrictOptions() {
+    const isCzechQuery = isCzech(document.getElementById('user-input').value);
+    
+    // Create a message showing Prague district options
+    const message = isCzechQuery
+        ? "Vyberte pražskou čtvrť:"
+        : "Choose a Prague district:";
+        
+    // Add the message as if the user asked for it
+    addMessage(isCzechQuery ? "Změnit lokalitu" : "Change location", 'user');
+    conversationHistory.push({role: "user", content: isCzechQuery ? "Změnit lokalitu" : "Change location"});
+    
+    // Create the district buttons
+    let districtButtonsHTML = `
+        <p>${message}</p>
+        <div class="suggestion-buttons">
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague')">All Prague</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 1')">Prague 1</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 2')">Prague 2</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 3')">Prague 3</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 4')">Prague 4</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 5')">Prague 5</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 6')">Prague 6</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 7')">Prague 7</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 8')">Prague 8</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 9')">Prague 9</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 10')">Prague 10</button>
+        </div>
+        <div class="suggestion-buttons" style="margin-top: 10px;">
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Brno')">Brno</button>
+            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Ostrava')">Ostrava</button>
+        </div>
+    `;
+    
+    // Display the district options
+    addMessage(districtButtonsHTML, 'bot');
+    conversationHistory.push({role: "assistant", content: message});
+}
+     
 // Function to handle progressive answers
 function handleProgressiveAnswer(value, displayText) {
     // First, display the user's answer
@@ -2942,46 +2982,6 @@ document.addEventListener('click', function(e) {
         // The actual functionality is handled via onclick attributes on the buttons
     }
 });
-     
-// Function to show Prague district options when "Change location" is clicked
-function showPragueDistrictOptions() {
-    const isCzechQuery = isCzech(document.getElementById('user-input').value);
-    
-    // Create a message showing Prague district options
-    const message = isCzechQuery
-        ? "Vyberte pražskou čtvrť:"
-        : "Choose a Prague district:";
-        
-    // Add the message as if the user asked for it
-    addMessage(isCzechQuery ? "Změnit lokalitu" : "Change location", 'user');
-    conversationHistory.push({role: "user", content: isCzechQuery ? "Změnit lokalitu" : "Change location"});
-    
-    // Create the district buttons
-    let districtButtonsHTML = `
-        <p>${message}</p>
-        <div class="suggestion-buttons">
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague')">All Prague</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 1')">Prague 1</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 2')">Prague 2</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 3')">Prague 3</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 4')">Prague 4</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 5')">Prague 5</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 6')">Prague 6</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 7')">Prague 7</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 8')">Prague 8</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 9')">Prague 9</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 10')">Prague 10</button>
-        </div>
-        <div class="suggestion-buttons" style="margin-top: 10px;">
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Brno')">Brno</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Ostrava')">Ostrava</button>
-        </div>
-    `;
-    
-    // Display the district options
-    addMessage(districtButtonsHTML, 'bot');
-    conversationHistory.push({role: "assistant", content: message});
-}
 
 // Add handleSuggestionClick and other functions to window so they can be called from onclick
 window.handleSuggestionClick = handleSuggestionClick;
