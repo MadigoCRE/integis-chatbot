@@ -36,15 +36,7 @@
             padding: 15px;
             font-weight: bold;
             text-align: center;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             position: relative;
-        }
-        
-        .chat-header-text {
-            font-family: 'Open Sans', Verdana, Arial, sans-serif;
-            font-weight: bold;
         }
         
         .messages-container {
@@ -302,43 +294,13 @@
             height: 10px;
         }
         
-        /* Colliers logo styling */
-        .colliers-logo {
-            display: flex;
-            align-items: center;
-        }
-        
-        .logo-text {
-            color: white;
-            font-family: 'Open Sans', Verdana, Arial, sans-serif;
-            font-weight: bold;
-            font-size: 18px;
-        }
-        
-        .logo-bars {
-            display: flex;
-            flex-direction: column;
-            margin-right: 5px;
-        }
-        
-        .logo-bar-red {
-            height: 4px;
-            width: 24px;
-            background-color: #ED1B34; /* Colliers Red */
-            margin-top: 2px;
-        }
+        /* Removing unused logo styling */
     </style>
 </head>
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            <div class="colliers-logo">
-                <span class="logo-text">Colliers</span>
-                <div class="logo-bars">
-                    <div class="logo-bar-red"></div>
-                </div>
-            </div>
-            <span class="chat-header-text"> Property Assistant</span>
+            Colliers Property Assistant
             <button id="reset-chat">New Chat</button>
         </div>
         <div id="messages" class="messages-container"></div>
