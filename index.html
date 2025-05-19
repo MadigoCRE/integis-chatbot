@@ -795,18 +795,16 @@ function enhancedSearchProperties(criteria) {
         }
     }
     
-   // Filter by availability - ONLY if not "Any"
-if (criteria.available && criteria.available.toLowerCase() !== 'any') {
-    const availableKeywords = criteria.available.toLowerCase().split(/\s+/);
-    results = results.filter(p => {
-        if (!p.available) return false;
-        const propertyAvailable = p.available.toLowerCase();
-        return availableKeywords.some(keyword => propertyAvailable.includes(keyword));
-    });
-    debugLog(`After availability filter: ${results.length} properties remaining`);
-} else {
-    debugLog("Availability filter skipped (set to 'Any' or not specified)");
-}
+    // Filter by availability
+    if (criteria.available) {
+        const availableKeywords = criteria.available.toLowerCase().split(/\s+/);
+        results = results.filter(p => {
+            if (!p.available) return false;
+            const propertyAvailable = p.available.toLowerCase();
+            return availableKeywords.some(keyword => propertyAvailable.includes(keyword));
+        });
+        debugLog(`After availability filter: ${results.length} properties remaining`);
+    }
     
     // Exclude specific properties if needed
     if (criteria.excludeNames && criteria.excludeNames.length > 0) {
@@ -814,78 +812,61 @@ if (criteria.available && criteria.available.toLowerCase() !== 'any') {
         debugLog(`After exclusion filter: ${results.length} properties remaining`);
     }
     
-// If no results and we have size criteria, try with more relaxed constraints
-if (results.length === 0 && (criteria.size || criteria.minSize || criteria.maxSize)) {
-    debugLog("No results with strict criteria, trying with relaxed constraints");
-    
-    // Save original results count for later
-    const originalResultsCount = results.length;
-    
-    // Reset results
-    results = [...properties];
-    
-    // Reapply non-size filters - KEEP PRAGUE DISTRICT FILTER STRICT
-    if (criteria.type) {
-        const typeKeywords = criteria.type.toLowerCase().split(/\s+/);
-        results = results.filter(p => {
-            if (!p.type) return false;
-            const propertyType = p.type.toLowerCase();
-            return typeKeywords.some(keyword => propertyType.includes(keyword));
-        });
-    }
-    
-    // IMPORTANT: Preserve the Prague district filter even in relaxed mode
-    if (criteria.location) {
-        if (criteria.location.toLowerCase().includes('prague')) {
-            // Handle Prague district special case - KEEP STRICT
-            const pragueDistrictMatch = criteria.location.match(/prague\s*(\d+)/i);
-            if (pragueDistrictMatch && pragueDistrictMatch[1]) {
-                // We found a Prague district, DO NOT RELAX this constraint
-                const districtNum = pragueDistrictMatch[1];
-                results = results.filter(p => {
-                    // Look for district in district field
-                    if (p.district) {
-                        const propertyDistrictMatch = p.district.match(/(\d+)/);
-                        if (propertyDistrictMatch && propertyDistrictMatch[1] === districtNum) {
-                            return true;
-                        }
-                    }
-                    
-                    // Also check location field
-                    if (p.location) {
-                        const locationDistrictMatch = p.location.match(/prague\s*(\d+)/i);
-                        if (locationDistrictMatch && locationDistrictMatch[1] === districtNum) {
-                            return true;
-                        }
-                    }
-                    
-                    return false;
-                });
-            } else {
-                // Just "Prague" with no district, keep as is
-                results = results.filter(p => {
-                    return (p.city && p.city.toLowerCase().includes('prague')) || 
-                          (p.location && p.location.toLowerCase().includes('prague'));
-                });
-            }
-        } else {
-            const locationKeywords = criteria.location.toLowerCase().split(/\s+/);
+    // If no results and we have size criteria, try with more relaxed constraints
+    if (results.length === 0 && (criteria.size || criteria.minSize || criteria.maxSize)) {
+        debugLog("No results with strict criteria, trying with relaxed constraints");
+        
+        // Save original results count for later
+        const originalResultsCount = results.length;
+        
+        // Reset results
+        results = [...properties];
+        
+        // Reapply non-size filters
+        if (criteria.type) {
+            const typeKeywords = criteria.type.toLowerCase().split(/\s+/);
             results = results.filter(p => {
-                const propertyLocation = (p.location || "").toLowerCase();
-                const propertyCity = (p.city || "").toLowerCase();
-                const propertyDistrict = (p.district || "").toLowerCase();
-                
-                return locationKeywords.some(keyword => 
-                    propertyLocation.includes(keyword) || 
-                    propertyCity.includes(keyword) || 
-                    propertyDistrict.includes(keyword)
-                );
+                if (!p.type) return false;
+                const propertyType = p.type.toLowerCase();
+                return typeKeywords.some(keyword => propertyType.includes(keyword));
             });
         }
-    }
-    
-    // Apply more relaxed size constraints (40% instead of 20%)
-    if (criteria.size) {
+        
+        // Reapply location filters (with special handling for Prague districts)
+        if (criteria.location) {
+            if (criteria.location.toLowerCase().includes('prague')) {
+                // Handle Prague district special case again
+                const pragueDistrictMatch = criteria.location.match(/prague\s*(\d+)/i);
+                if (pragueDistrictMatch && pragueDistrictMatch[1]) {
+                    // We found a Prague district, but let's be more lenient
+                    results = results.filter(p => {
+                        return (p.city && p.city.toLowerCase().includes('prague')) || 
+                              (p.location && p.location.toLowerCase().includes('prague'));
+                    });
+                } else {
+                    results = results.filter(p => {
+                        return (p.city && p.city.toLowerCase().includes('prague')) || 
+                              (p.location && p.location.toLowerCase().includes('prague'));
+                    });
+                }
+            } else {
+                const locationKeywords = criteria.location.toLowerCase().split(/\s+/);
+                results = results.filter(p => {
+                    const propertyLocation = (p.location || "").toLowerCase();
+                    const propertyCity = (p.city || "").toLowerCase();
+                    const propertyDistrict = (p.district || "").toLowerCase();
+                    
+                    return locationKeywords.some(keyword => 
+                        propertyLocation.includes(keyword) || 
+                        propertyCity.includes(keyword) || 
+                        propertyDistrict.includes(keyword)
+                    );
+                });
+            }
+        }
+        
+        // Apply more relaxed size constraints (40% instead of 20%)
+        if (criteria.size) {
             const targetSize = parseInt(criteria.size);
             if (!isNaN(targetSize)) {
                 const minSize = targetSize * 0.6;
@@ -920,8 +901,8 @@ if (results.length === 0 && (criteria.size || criteria.minSize || criteria.maxSi
             }
         }
         
-       debugLog(`After relaxed criteria with preserved district filter: ${results.length} properties remaining (was ${originalResultsCount})`);
-}
+        debugLog(`After relaxed criteria: ${results.length} properties remaining (was ${originalResultsCount})`);
+    }
     
     debugLog(`Final search results: ${results.length} properties`);
     return results;
@@ -1978,6 +1959,10 @@ function handlePeopleCountClick(peopleCount, displayText) {
     }, 1000);
 }     
 
+// Function to handle people count button click
+function handlePeopleCountClick(peopleCount, displayText) {
+    // Function code...
+}
 
 // Function to handle "Help me with size" button click from guided search
 function handleSizeHelpFromGuided(spaceType) {
@@ -2187,9 +2172,6 @@ function handleRefinementClick(refinementType, value) {
     // Get current criteria
     let criteria = {...conversationState.currentSearchCriteria} || {};
     
-    // Log the criteria before any changes
-    debugLog("Current criteria before refinement:", JSON.stringify(criteria));
-    
     // Update criteria based on refinement type
     switch (refinementType) {
         case 'minSize':
@@ -2208,26 +2190,13 @@ function handleRefinementClick(refinementType, value) {
             criteria.available = value;
             break;
         case 'clearSize':
-    // Log the criteria before clearing size
-    debugLog("Criteria before clearing size:", JSON.stringify(criteria));
-    
-    // Remove all size-related fields
-    delete criteria.size;
-    delete criteria.minSize;
-    delete criteria.maxSize;
-    
-    // Set a flag to indicate we just cleared size restrictions
-    criteria.clearSizeAction = true;
-    
-    // Log after clearing
-    debugLog("Criteria after clearing size:", JSON.stringify(criteria));
-    break;
+            delete criteria.size;
+            delete criteria.minSize;
+            delete criteria.maxSize;
+            break;
         default:
             break;
     }
-    
-    // Reset pagination offset
-    conversationState.offset = 0;
     
     // Update conversation state
     conversationState.currentSearchCriteria = criteria;
@@ -2244,14 +2213,8 @@ function handleRefinementClick(refinementType, value) {
     addMessage(refinementText, 'user');
     conversationHistory.push({role: "user", content: refinementText});
     
-    // Log the final criteria we're searching with
-    debugLog("About to search with these criteria:", JSON.stringify(criteria));
-    
     // Trigger a new search with updated criteria
     const searchResults = enhancedSearchProperties(criteria);
-    
-    // Log the search results count
-    debugLog(`Search returned ${searchResults.length} results for ${criteria.location} with type ${criteria.type}`);
     
     // Generate and show results
     displaySearchResults(searchResults, criteria);
@@ -2292,10 +2255,6 @@ function getReadableCriteria(type, value, isCzechLanguage) {
 
 // Function to display search results
 function displaySearchResults(matchedProperties, criteria) {
-    // Add detailed logging about the criteria and results
-    debugLog("Displaying search results for criteria:", JSON.stringify(criteria));
-    debugLog(`Found ${matchedProperties.length} matching properties`);
-    
     // Show typing indicator
     const typingIndicator = document.createElement('div');
     typingIndicator.className = 'typing-indicator';
@@ -2314,27 +2273,11 @@ function displaySearchResults(matchedProperties, criteria) {
         
         // Check if we have results
         if (matchedProperties.length > 0) {
-            debugLog("Displaying positive search results");
-            
             // Generate introduction text
             const isCzechQuery = isCzech(document.getElementById('user-input').value);
-            
-            // Provide more contextual responses based on filter changes
-            let response = "";
-            
-            // If we just cleared size restrictions, mention it specifically
-            if (criteria.clearSizeAction) {
-                response = isCzechQuery 
-                    ? `Po odstranění filtru velikosti jsem našel ${matchedProperties.length} nemovitostí s těmito parametry:<br><br>`
-                    : `After removing size restrictions, I found ${matchedProperties.length} properties with these parameters:<br><br>`;
-                
-                // Remove the flag after using it
-                delete criteria.clearSizeAction;
-            } else {
-                response = isCzechQuery 
-                    ? `Našel jsem ${matchedProperties.length} nemovitostí s těmito parametry:<br><br>`
-                    : `I found ${matchedProperties.length} properties with these parameters:<br><br>`;
-            }
+            let response = isCzechQuery 
+                ? `Našel jsem ${matchedProperties.length} nemovitostí s těmito parametry:<br><br>`
+                : `I found ${matchedProperties.length} properties with these parameters:<br><br>`;
             
             // Add active filters section
             response += generateActiveFiltersHTML(criteria, isCzechQuery);
@@ -2361,7 +2304,8 @@ function displaySearchResults(matchedProperties, criteria) {
             // Add refinement buttons
             response += generateRefinementButtonsHTML(criteria, isCzechQuery);
             
-            // REMOVED: "You can also ask:" section with suggestion buttons
+            // Add suggestion buttons for common follow-ups
+            response += generateSuggestionButtonsHTML(criteria, isCzechQuery);
             
             // Update last shown properties
             conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
@@ -2370,20 +2314,6 @@ function displaySearchResults(matchedProperties, criteria) {
             addMessage(response, 'bot');
             conversationHistory.push({role: "assistant", content: response});
         } else {
-            debugLog("No matching properties found, showing suggestions");
-            
-            // Add logging to help diagnose which filters might be causing the issue
-            debugLog("Current criteria causing no results:", JSON.stringify(criteria));
-            if (criteria.type) debugLog("Has type filter:", criteria.type);
-            if (criteria.location) debugLog("Has location filter:", criteria.location);
-            if (criteria.size || criteria.minSize || criteria.maxSize) {
-                debugLog("Has size filters:", 
-                    criteria.size ? `size=${criteria.size}` : '', 
-                    criteria.minSize ? `minSize=${criteria.minSize}` : '', 
-                    criteria.maxSize ? `maxSize=${criteria.maxSize}` : '');
-            }
-            if (criteria.available) debugLog("Has availability filter:", criteria.available);
-            
             // No results found
             const isCzechQuery = isCzech(document.getElementById('user-input').value);
             let noResultsResponse = isCzechQuery
@@ -2393,7 +2323,7 @@ function displaySearchResults(matchedProperties, criteria) {
             // Add active filters section
             noResultsResponse += generateActiveFiltersHTML(criteria, isCzechQuery);
             
-            // Add suggestion to modify search with more targeted recommendations
+            // Add suggestion to modify search
             noResultsResponse += isCzechQuery
                 ? `<p>Zkuste upravit vyhledávací kritéria pro více výsledků:</p>`
                 : `<p>Try modifying your search criteria for more results:</p>`;
@@ -2401,14 +2331,8 @@ function displaySearchResults(matchedProperties, criteria) {
             // Add buttons to relax search criteria
             noResultsResponse += `<div class="suggestion-buttons">`;
             
-            // Suggest clearing size filters if they exist
             if (criteria.minSize || criteria.maxSize || criteria.size) {
                 noResultsResponse += `<button class="suggestion-button" onclick="handleRefinementClick('clearSize', '')">${isCzechQuery ? 'Odstranit omezení velikosti' : 'Remove size restrictions'}</button>`;
-            }
-            
-            // If availability is set to something other than "Any", suggest changing it
-            if (criteria.available && criteria.available.toLowerCase() !== 'any') {
-                noResultsResponse += `<button class="suggestion-button" onclick="handleRefinementClick('available', 'Any')">${isCzechQuery ? 'Jakákoli dostupnost' : 'Any availability'}</button>`;
             }
             
             // More buttons to try different locations or types
@@ -2440,6 +2364,7 @@ function displaySearchResults(matchedProperties, criteria) {
         }
     }, 500);
 }
+
 // Function to generate active filters HTML
 function generateActiveFiltersHTML(criteria, isCzechQuery) {
     let filtersHTML = '';
@@ -2490,7 +2415,7 @@ function generateActiveFiltersHTML(criteria, isCzechQuery) {
     
     return filtersHTML;
 }
-// Function to generate refinement buttons HTML
+   // Function to generate refinement buttons HTML
 function generateRefinementButtonsHTML(criteria, isCzechQuery) {
     let buttonsHTML = `<div class="refinement-buttons">
         <div style="width:100%; margin-bottom:5px; font-size:12px; color:#666;">
@@ -2516,13 +2441,6 @@ function generateRefinementButtonsHTML(criteria, isCzechQuery) {
         // Option to clear size filter if one is applied
         buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('clearSize', '')">
             ${isCzechQuery ? 'Odstranit omezení velikosti' : 'Clear size filter'}
-        </button>`;
-    }
-    
-    // NEW ADDITION: Change location button for Prague districts
-    if (criteria.location && criteria.location.toLowerCase().includes('prague')) {
-        buttonsHTML += `<button class="refinement-button" onclick="alert('Testing button'); showPragueDistrictOptions()">
-            ${isCzechQuery ? 'Změnit lokalitu' : 'Change location'}
         </button>`;
     }
     
@@ -2796,7 +2714,6 @@ function startProgressiveConversation() {
     conversationHistory.push({role: "assistant", content: firstQuestion});
 }
 
-     
 // Function to handle progressive answers
 function handleProgressiveAnswer(value, displayText) {
     // First, display the user's answer
@@ -2923,47 +2840,6 @@ if (flow.steps[flow.currentStep].field === 'location') {
     conversationHistory.push({role: "assistant", content: nextQuestion});
 }
 
-// Function to show Prague district options when "Change location" is clicked
-function showPragueDistrictOptions() {
-    const isCzechQuery = isCzech(document.getElementById('user-input').value);
-    
-    // Create a message showing Prague district options
-    const message = isCzechQuery
-        ? "Vyberte pražskou čtvrť:"
-        : "Choose a Prague district:";
-        
-    // Add the message as if the user asked for it
-    addMessage(isCzechQuery ? "Změnit lokalitu" : "Change location", 'user');
-    conversationHistory.push({role: "user", content: isCzechQuery ? "Změnit lokalitu" : "Change location"});
-    
-    // Create the district buttons
-    let districtButtonsHTML = `
-        <p>${message}</p>
-        <div class="suggestion-buttons">
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague')">All Prague</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 1')">Prague 1</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 2')">Prague 2</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 3')">Prague 3</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 4')">Prague 4</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 5')">Prague 5</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 6')">Prague 6</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 7')">Prague 7</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 8')">Prague 8</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 9')">Prague 9</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Prague 10')">Prague 10</button>
-        </div>
-        <div class="suggestion-buttons" style="margin-top: 10px;">
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Brno')">Brno</button>
-            <button class="suggestion-button" onclick="handleRefinementClick('location', 'Ostrava')">Ostrava</button>
-        </div>
-    `;
-    
-    // Display the district options
-    addMessage(districtButtonsHTML, 'bot');
-    conversationHistory.push({role: "assistant", content: message});
-}
-
-
 // Add listener for debug command
 document.getElementById('user-input').addEventListener('input', function(e) {
     if (e.target.value.trim().toLowerCase() === "!test api") {
@@ -2991,4 +2867,6 @@ window.handleShowMore = handleShowMore;
 window.startProgressiveConversation = startProgressiveConversation;
 window.handleProgressiveAnswer = handleProgressiveAnswer;
 window.handlePeopleCountClick = handlePeopleCountClick;
-window.showPragueDistrictOptions = showPragueDistrictOptions; // Add this line
+</script>
+</body>
+</html>  
