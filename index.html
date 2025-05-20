@@ -1082,7 +1082,7 @@ function generatePropertyListingHTML(properties, offset = 0, limit = 5) {
     
     return html;
 }
- // Updated local response generator with improved criteria handling
+// Updated local response generator with improved criteria handling
 function generateLocalResponse(userInput) {
     debugLog("Generating local response for:", userInput);
     userInput = userInput.toLowerCase();
@@ -1147,7 +1147,7 @@ function generateLocalResponse(userInput) {
     conversationState.currentSearchCriteria = {...criteria};
     debugLog("Updated conversation state with new criteria:", conversationState.currentSearchCriteria);
     
- // Search for matching properties with enhanced search function
+    // Search for matching properties with enhanced search function
     let matchedProperties = enhancedSearchProperties(criteria);
     
     // Store the properties we've shown for follow-up questions
@@ -1161,10 +1161,6 @@ function generateLocalResponse(userInput) {
         conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
         debugLog("Updated last shown properties:", conversationState.lastShownProperties);
     }
-    
-    // Generate and display enhanced response with implied features explanation
-    displayEnhancedSearchResults(matchedProperties, criteria, impliedFeatures, inputText);
-}
     
     // Generate response
     if (matchedProperties.length > 0) {
@@ -1250,7 +1246,6 @@ function generateLocalResponse(userInput) {
         
         // Add refinement buttons
         response += generateRefinementButtonsHTML(criteria, isCzechQuery);
-        
         
         return response;
     } else {
@@ -3679,7 +3674,6 @@ window.handleShowMore = handleShowMore;
 window.startProgressiveConversation = startProgressiveConversation;
 window.handleProgressiveAnswer = handleProgressiveAnswer;
 window.handlePeopleCountClick = handlePeopleCountClick;
-window.showPragueDistrictOptions = showPragueDistrictOptions; 
 window.handleSizeHelpClickFromRefinement = handleSizeHelpClickFromRefinement;
 window.handlePeopleCountFromRefinement = handlePeopleCountFromRefinement;
 window.handleDirectPeopleClick = handleDirectPeopleClick;
