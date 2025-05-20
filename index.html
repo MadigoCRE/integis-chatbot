@@ -1183,115 +1183,6 @@ function generateLocalResponse(userInput) {
 }
 
 // Enhanced function to call Gemini API specifically for people to sqm conversion
-async function callGeminiAPIForPeopleConversion(peopleCount, spaceType = "office") {
-    debugLog("Calling Gemini API to convert people count to sqm");
-    
-    try {
-        // Format the prompt for Gemini
-        const conversionPrompt = `
-        You are a commercial real estate expert. Convert number of people to square meters needed for ${spaceType} space.
-        Be realistic and follow these guidelines:
-        - For office space: typically 8-12 sqm per person for standard offices, 15-20 sqm for executive space
-        - For retail: depends on type but generally 15-40 sqm per staff member
-        - For industrial: typically 25-50 sqm per worker depending on operations
-        
-        For ${peopleCount} people in a ${spaceType} space, provide:
-        1. The minimum and maximum sqm required as a range
-        2. A short explanation about why this amount of space is appropriate
-        3. Additional considerations like meeting rooms, common areas, etc.
-        
-        Format your response EXACTLY as a JSON object with these properties:
-        {
-          "minSize": number,
-          "maxSize": number,
-          "explanation": "brief explanation text",
-          "considerations": "brief additional considerations"
-        }
-        
-        Do not include any other text, ONLY return the JSON object.
-        `;
-        
-        // Call the Gemini API
-        const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                contents: [
-                    {
-                        role: "user",
-                        parts: [{ text: conversionPrompt }]
-                    }
-                ],
-                generationConfig: {
-                    temperature: 0.2,  // Lower temperature for more deterministic output
-                    maxOutputTokens: 400
-                }
-            })
-        });
-        
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        
-        // Extract the generated text
-        if (result.candidates && result.candidates.length > 0 && 
-            result.candidates[0].content && result.candidates[0].content.parts && 
-            result.candidates[0].content.parts.length > 0) {
-            
-            const generatedText = result.candidates[0].content.parts[0].text.trim();
-            debugLog("Received conversion response:", generatedText);
-            
-            // Parse the JSON response
-            try {
-                const conversion = JSON.parse(generatedText);
-                if (conversion.minSize && conversion.maxSize) {
-                    return {
-                        minSize: Math.round(conversion.minSize),
-                        maxSize: Math.round(conversion.maxSize),
-                        explanation: conversion.explanation || "This size range is appropriate based on commercial real estate standards.",
-                        considerations: conversion.considerations || "Consider meeting rooms, break areas, and circulation space."
-                    };
-                }
-            } catch (parseError) {
-                debugLog("Error parsing conversion JSON:", parseError.message);
-                // Try to extract numbers from the text if JSON parsing fails
-                const numbers = generatedText.match(/\d+/g);
-                if (numbers && numbers.length >= 2) {
-                    return {
-                        minSize: Math.round(parseInt(numbers[0])),
-                        maxSize: Math.round(parseInt(numbers[1])),
-                        explanation: "This size range is based on industry standards.",
-                        considerations: "Consider additional space for amenities and common areas."
-                    };
-                }
-            }
-        }
-        
-        throw new Error("Could not extract size conversion from Gemini response");
-    } catch (error) {
-        debugLog("Error in people to sqm conversion:", error.message);
-        // Provide a fallback conversion based on standard metrics
-        const fallbackSizes = {
-            "office": { min: Math.round(peopleCount * 8), max: Math.round(peopleCount * 12) },
-            "retail": { min: Math.round(peopleCount * 15), max: Math.round(peopleCount * 40) },
-            "industrial": { min: Math.round(peopleCount * 25), max: Math.round(peopleCount * 50) }
-        };
-        
-        const fallback = fallbackSizes[spaceType] || fallbackSizes.office;
-        debugLog("Using fallback conversion:", fallback);
-        
-        return {
-            minSize: fallback.min,
-            maxSize: fallback.max,
-            explanation: `Based on industry standards, we typically allocate ${fallback.min/peopleCount}-${fallback.max/peopleCount} sqm per person for ${spaceType} space.`,
-            considerations: `For ${peopleCount} people, consider additional space for meeting rooms, reception areas, and circulation space.`
-        };
-    }
-}
  // Call the Gemini API
 async function callGeminiAPI(userInput) {
     debugLog("Starting Gemini API call for input:", userInput);
@@ -1874,7 +1765,7 @@ function handleSizeHelpClick() {
 }
 // Fix for handleSizeHelpClickFromRefinement function
 function handleSizeHelpClickFromRefinement() {
-    debugLog("handleSizeHelpClickFromRefinement called");
+    debugLog("handleSizeHelpClickFromRefinement called - UPDATED VERSION");
     
     // User asked for help with sizing
     const isCzechQuery = isCzech(document.getElementById('user-input').value);
@@ -1882,45 +1773,34 @@ function handleSizeHelpClickFromRefinement() {
         ? "Rád vám pomůžu určit správnou velikost prostoru. Kolik lidí bude prostor využívat?"
         : "I'd be happy to help you determine the right space size. How many people will be using the space?";
     
-    // Add the user's query to the chat
+    // Add the "Help me with size" message to the chat as if the user had asked it
     addMessage(isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size", 'user');
     conversationHistory.push({role: "user", content: isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size"});
     
-    // Add size range buttons
-    const sizeRanges = [
-        { range: '0-10', labelCz: '0-10 lidí', labelEn: '0-10 people' },
-        { range: '11-20', labelCz: '11-20 lidí', labelEn: '11-20 people' },
-        { range: '21-50', labelCz: '21-50 lidí', labelEn: '21-50 people' },
-        { range: '51-100', labelCz: '51-100 lidí', labelEn: '51-100 people' },
-        { range: '100+', labelCz: 'Více než 100 lidí', labelEn: 'More than 100 people' }
-    ];
+    // Use hardcoded HTML for buttons to avoid any string interpolation issues
+    // This is simpler and more reliable
+    let buttonsHTML = '';
     
-    let sizeRangeButtonsHTML = `<div class="suggestion-buttons">`;
-    sizeRanges.forEach(sizeRange => {
-        const label = isCzechQuery ? sizeRange.labelCz : sizeRange.labelEn;
-        let peopleCount;
-        
-        if (sizeRange.range === '0-10') {
-            peopleCount = 10;
-        } else if (sizeRange.range === '11-20') {
-            peopleCount = 20;
-        } else if (sizeRange.range === '21-50') {
-            peopleCount = 50;
-        } else if (sizeRange.range === '51-100') {
-            peopleCount = 100;
-        } else if (sizeRange.range === '100+') {
-            peopleCount = 150;
-        }
-        
-        // Use a custom handler to ensure proper context
-        sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountFromRefinement(${peopleCount}, '${label}')">
-            ${label}
-        </button>`;
-    });
-    sizeRangeButtonsHTML += `</div>`;
+    if (isCzechQuery) {
+        buttonsHTML = `<div class="suggestion-buttons">
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(10, '0-10 lidí')">0-10 lidí</button>
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(20, '11-20 lidí')">11-20 lidí</button>
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(50, '21-50 lidí')">21-50 lidí</button>
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(100, '51-100 lidí')">51-100 lidí</button>
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(150, 'Více než 100 lidí')">Více než 100 lidí</button>
+        </div>`;
+    } else {
+        buttonsHTML = `<div class="suggestion-buttons">
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(10, '0-10 people')">0-10 people</button>
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(20, '11-20 people')">11-20 people</button>
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(50, '21-50 people')">21-50 people</button>
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(100, '51-100 people')">51-100 people</button>
+            <button class="suggestion-button" onclick="handleDirectPeopleClick(150, 'More than 100 people')">More than 100 people</button>
+        </div>`;
+    }
     
     // Display the help message with size range buttons
-    addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
+    addMessage(helpMessage + "<br><br>" + buttonsHTML, 'bot');
     conversationHistory.push({role: "assistant", content: helpMessage});
 }
 
@@ -2031,8 +1911,116 @@ function handlePeopleCountFromRefinement(peopleCount, displayText) {
     }, 1000);
 }
 
-// Make sure to add the function to the window object so it can be called from onclick
-window.handlePeopleCountFromRefinement = handlePeopleCountFromRefinement;
+function handleDirectPeopleClick(peopleCount, displayText) {
+    debugLog(`handleDirectPeopleClick called with count=${peopleCount}, text=${displayText}`);
+    
+    // Add the user's selection to the chat
+    addMessage(displayText, 'user');
+    conversationHistory.push({role: "user", content: displayText});
+    
+    // Show typing indicator
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing-indicator';
+    typingIndicator.textContent = 'Typing...';
+    typingIndicator.id = 'typing-indicator';
+    document.getElementById('messages').appendChild(typingIndicator);
+    
+    // Process the people count
+    setTimeout(async () => {
+        try {
+            // Get current criteria
+            const currentCriteria = conversationState.currentSearchCriteria || {};
+            const spaceType = currentCriteria.type || "office";
+            
+            debugLog(`Directly converting ${peopleCount} people to sqm for ${spaceType} space`, currentCriteria);
+            
+            // Call Gemini API to convert people to sqm
+            const conversionResponse = await callGeminiAPIForPeopleConversion(peopleCount, spaceType);
+            
+            // Log the response to verify
+            debugLog("Conversion response received:", conversionResponse);
+            
+            // Create criteria with the size range
+            const criteria = {...currentCriteria};
+            delete criteria.size; // Remove any size if present
+            criteria.minSize = conversionResponse.minSize;
+            criteria.maxSize = conversionResponse.maxSize;
+            
+            // Update conversation state
+            conversationState.currentSearchCriteria = criteria;
+            
+            // Remove typing indicator
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
+            }
+            
+            debugLog("Converted people to sqm, updated criteria:", criteria);
+            
+            // Search with the updated criteria
+            const matchedProperties = enhancedSearchProperties(criteria);
+            
+            if (matchedProperties.length > 0) {
+                // Format the explanation with the details from Gemini
+                const isCzechQuery = isCzech(displayText);
+                const conversionExplanation = isCzechQuery
+                    ? `Pro ${peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Zde jsou nemovitosti, které odpovídají těmto požadavkům:`
+                    : `For ${peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Here are the properties that match these requirements:`;
+                
+                // Generate property listings HTML
+                const propertyListingsHTML = generatePropertyListingHTML(matchedProperties, 0, 5);
+                
+                // Add pagination information
+                const paginationHTML = isCzechQuery
+                    ? `<br>Zobrazuji 1-${Math.min(5, matchedProperties.length)} z ${matchedProperties.length} nalezených nemovitostí.${matchedProperties.length > 5 ? '<br><div class="action-button-container"><button class="action-button" onclick="handleShowMore()">Zobrazit další</button></div>' : ''}`
+                    : `<br>Showing 1-${Math.min(5, matchedProperties.length)} of ${matchedProperties.length} matching properties.${matchedProperties.length > 5 ? '<br><div class="action-button-container"><button class="action-button" onclick="handleShowMore()">Show More</button></div>' : ''}`;
+                
+                // Add active filters
+                const filtersHTML = generateActiveFiltersHTML(criteria, isCzechQuery);
+                
+                // Add refinement buttons
+                const refinementHTML = generateRefinementButtonsHTML(criteria, isCzechQuery);
+                
+                // Combine everything
+                const fullResponse = conversionExplanation + "<br><br>" + propertyListingsHTML + paginationHTML + filtersHTML + refinementHTML;
+                
+                // Update last shown properties
+                conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
+                
+                // Reset pagination offset
+                conversationState.offset = 0;
+                
+                // Display the response
+                addMessage(fullResponse, 'bot');
+                conversationHistory.push({role: "assistant", content: fullResponse});
+            } else {
+                // No matching properties found
+                const isCzechQuery = isCzech(displayText);
+                const noMatchResponse = isCzechQuery
+                    ? `Pro ${peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Bohužel jsem nenašel žádné nemovitosti, které přesně odpovídají těmto parametrům. Zkuste prosím upravit kritéria vyhledávání nebo se podívat na alternativy.`
+                    : `For ${peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Unfortunately, I couldn't find any properties that exactly match these parameters. Please try adjusting your search criteria or looking at alternatives.`;
+                
+                // Display the response
+                addMessage(noMatchResponse, 'bot');
+                conversationHistory.push({role: "assistant", content: noMatchResponse});
+            }
+        } catch (error) {
+            debugLog("Error processing people count from direct click:", error.message, error.stack);
+            
+            // Remove typing indicator
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
+            }
+            
+            // Display error message
+            const errorMessage = isCzech(displayText)
+                ? "Omlouvám se, ale došlo k chybě při zpracování vašeho požadavku. Zkuste prosím zadat počet lidí přímo ve vašem dotazu, například: 'Potřebuji kancelář pro 50 lidí'."
+                : "I'm sorry, but there was an error processing your request. Please try specifying the number of people directly in your query, for example: 'I need an office for 50 people'.";
+            
+            addMessage(errorMessage, 'bot');
+            conversationHistory.push({role: "assistant", content: errorMessage});
+        }
+    }, 1000);
+}
      
 // Function to handle people count button click
 function handlePeopleCountClick(peopleCount, displayText) {
@@ -3114,6 +3102,7 @@ window.handlePeopleCountClick = handlePeopleCountClick;
 window.showPragueDistrictOptions = showPragueDistrictOptions; 
 window.handleSizeHelpClickFromRefinement = handleSizeHelpClickFromRefinement;
 window.handlePeopleCountFromRefinement = handlePeopleCountFromRefinement;
+window.handleDirectPeopleClick = handleDirectPeopleClick;
 </script>
 </body>
 </html>  
