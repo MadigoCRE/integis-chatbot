@@ -619,6 +619,109 @@ function extractSearchCriteria(userInput, previousCriteria = null) {
     return criteria;
 }
 
+  // Enhanced search criteria extraction using Gemini and traditional methods
+async function enhancedExtractSearchCriteria(userInput, previousCriteria = null) {
+    debugLog("Performing enhanced extraction for:", userInput);
+    
+    // First, try to extract implied features using Gemini
+    const impliedFeatures = await extractImpliedFeaturesWithGemini(userInput);
+    
+    // Also extract criteria using traditional method
+    const traditionalCriteria = extractSearchCriteria(userInput, previousCriteria);
+    
+    // If Gemini extraction failed, just use traditional method
+    if (!impliedFeatures) {
+        debugLog("Using only traditional criteria extraction (Gemini failed)");
+        return traditionalCriteria;
+    }
+    
+    // Merge the criteria, with traditional taking precedence for explicit values
+    let enhancedCriteria = {...previousCriteria} || {};
+    
+    // Process property type
+    if (impliedFeatures.propertyType && impliedFeatures.propertyType.value) {
+        const type = impliedFeatures.propertyType.value.toLowerCase();
+        // Only use implied type if no explicit type was extracted traditionally
+        if (!traditionalCriteria.type && impliedFeatures.propertyType.confidence !== "low") {
+            enhancedCriteria.type = type;
+            debugLog(`Added implied property type: ${type} (confidence: ${impliedFeatures.propertyType.confidence})`);
+        }
+    }
+    
+    // Process location with special handling for Prague districts
+    if (impliedFeatures.location && impliedFeatures.location.value) {
+        // Only use implied location if no explicit location was extracted traditionally
+        if (!traditionalCriteria.location && impliedFeatures.location.confidence !== "low") {
+            const location = impliedFeatures.location.value;
+            
+            // Handle special cases like "city center" -> Prague 1 and 2
+            if (location === "city center" || location === "downtown") {
+                // Create a combined district search
+                enhancedCriteria.location = "Prague 1 or Prague 2";
+                debugLog(`Translated "city center" to "Prague 1 or Prague 2"`);
+            } else if (location.toLowerCase().includes("airport")) {
+                enhancedCriteria.location = "Prague 6";
+                debugLog(`Translated "airport area" to "Prague 6"`);
+            } else {
+                enhancedCriteria.location = location;
+                debugLog(`Added implied location: ${location} (confidence: ${impliedFeatures.location.confidence})`);
+            }
+        }
+    }
+    
+    // Process size requirements
+    if (impliedFeatures.size && impliedFeatures.size.value) {
+        // Only use implied size if no explicit size was extracted traditionally
+        if (!traditionalCriteria.size && !traditionalCriteria.minSize && !traditionalCriteria.maxSize) {
+            const sizeValue = impliedFeatures.size.value;
+            
+            // Check if it's a range (e.g., "200-300")
+            if (typeof sizeValue === 'string' && sizeValue.includes('-')) {
+                const [min, max] = sizeValue.split('-').map(s => parseInt(s.trim()));
+                if (!isNaN(min) && !isNaN(max)) {
+                    enhancedCriteria.minSize = min.toString();
+                    enhancedCriteria.maxSize = max.toString();
+                    debugLog(`Added implied size range: ${min}-${max} sqm (confidence: ${impliedFeatures.size.confidence})`);
+                }
+            } else {
+                // It's a single value, treat as approximate
+                const size = parseInt(sizeValue);
+                if (!isNaN(size)) {
+                    enhancedCriteria.size = size.toString();
+                    debugLog(`Added implied size: ~${size} sqm (confidence: ${impliedFeatures.size.confidence})`);
+                }
+            }
+        }
+    }
+    
+    // Process availability timing
+    if (impliedFeatures.timing && impliedFeatures.timing.value) {
+        // Only use implied timing if no explicit availability was extracted traditionally
+        if (!traditionalCriteria.available && impliedFeatures.timing.confidence !== "low") {
+            const timing = impliedFeatures.timing.value.toLowerCase();
+            
+            if (timing === "immediate" || timing === "now") {
+                enhancedCriteria.available = "now";
+                debugLog(`Added implied availability: immediate (confidence: ${impliedFeatures.timing.confidence})`);
+            } else if (timing.includes("q1") || timing.includes("q2") || 
+                     timing.includes("q3") || timing.includes("q4")) {
+                enhancedCriteria.available = timing.toUpperCase();
+                debugLog(`Added implied availability: ${timing} (confidence: ${impliedFeatures.timing.confidence})`);
+            }
+        }
+    }
+    
+    // Store the full implied features for reference and explanation
+    enhancedCriteria.impliedFeatures = impliedFeatures;
+    
+    // Finally, apply any explicit criteria from traditional extraction
+    // This ensures explicit mentions always override implied ones
+    enhancedCriteria = {...enhancedCriteria, ...traditionalCriteria};
+    
+    debugLog("Final enhanced criteria:", enhancedCriteria);
+    return enhancedCriteria;
+}   
+     
 // Enhanced search function with proper Prague district handling
 function enhancedSearchProperties(criteria) {
     debugLog("Searching properties with criteria:", criteria);
@@ -1044,7 +1147,7 @@ function generateLocalResponse(userInput) {
     conversationState.currentSearchCriteria = {...criteria};
     debugLog("Updated conversation state with new criteria:", conversationState.currentSearchCriteria);
     
-    // Search for matching properties with enhanced search function
+ // Search for matching properties with enhanced search function
     let matchedProperties = enhancedSearchProperties(criteria);
     
     // Store the properties we've shown for follow-up questions
@@ -1058,6 +1161,10 @@ function generateLocalResponse(userInput) {
         conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
         debugLog("Updated last shown properties:", conversationState.lastShownProperties);
     }
+    
+    // Generate and display enhanced response with implied features explanation
+    displayEnhancedSearchResults(matchedProperties, criteria, impliedFeatures, inputText);
+}
     
     // Generate response
     if (matchedProperties.length > 0) {
@@ -1302,6 +1409,120 @@ async function callGeminiAPIForPeopleConversion(peopleCount, spaceType = "office
     }
 }
 
+// Function to extract implied features from user query using Gemini
+async function extractImpliedFeaturesWithGemini(userQuery) {
+    debugLog("Extracting implied features from query:", userQuery);
+    
+    try {
+        // Specialized prompt for feature extraction
+        const featureExtractionPrompt = `You are a commercial real estate expert assistant for the Prague market. Your task is to analyze user queries about property searches and extract both explicit and implied requirements.
+
+IMPORTANT CONTEXT ABOUT PRAGUE REAL ESTATE:
+- Prague 1 and 2 are considered the "city center" or "downtown"
+- Prague 6 contains the airport area
+- Prague 4 and 5 have many corporate headquarters and business districts
+- Prague 7 is an up-and-coming area with creative businesses
+- Prague 3, 8, 9, and 10 are more residential but have smaller business zones
+- Office sizes in Prague typically range from 100-5000 sqm
+- Retail spaces typically range from 50-2000 sqm
+- Industrial spaces typically range from 300-10000 sqm
+
+EXTRACTION TASK:
+Analyze the user's query and extract the following information:
+1. Property type (office, retail, industrial)
+2. Location details (specific district or area)
+3. Size requirements (exact or range in sqm)
+4. Implied quality level (basic, standard, premium)
+5. Proximity requirements (near public transport, highway, etc.)
+6. Timing needs (immediate availability, future date)
+7. Special amenities mentioned or implied
+8. Budget considerations if mentioned
+
+For each extracted piece of information, include:
+- The actual value
+- Whether it was explicitly stated or implied
+- Confidence level (high, medium, low)
+- Reasoning for implied features
+
+FORMAT YOUR RESPONSE AS A JSON OBJECT:
+{
+  "propertyType": {"value": "office", "explicit": true, "confidence": "high"},
+  "location": {"value": "Prague 1", "explicit": false, "confidence": "medium", "reasoning": "User mentioned 'city center' which typically refers to Prague 1"},
+  "size": {"value": "200-300", "explicit": true, "confidence": "high"},
+  "quality": {"value": "premium", "explicit": false, "confidence": "medium", "reasoning": "User mentioned 'prestigious' which suggests premium quality"},
+  "proximity": {"value": "metro", "explicit": false, "confidence": "low", "reasoning": "User mentioned 'accessible' which often implies public transport"},
+  "timing": {"value": "immediate", "explicit": true, "confidence": "high"},
+  "amenities": {"value": ["parking", "meeting rooms"], "explicit": false, "confidence": "low", "reasoning": "User mentioned team meetings which suggests need for meeting rooms"},
+  "budget": {"value": "above average", "explicit": false, "confidence": "low", "reasoning": "Premium location and immediate availability suggest higher budget"}
+}
+
+EXAMPLES:
+Query: "I need an office in the city center around 300 sqm available next month"
+Expected extraction: Location should be identified as Prague 1 or 2 (implied from "city center"), with property type "office", size "300 sqm", and timing for next month.
+
+Query: "Looking for warehouse space near the airport with loading docks"
+Expected extraction: Location should be identified as Prague 6 (implied from "near the airport"), property type "industrial", with "loading docks" as an amenity.
+
+IMPORTANT:
+- Only include information that can be reasonably extracted or inferred
+- Mark speculative extractions with low confidence
+- If you cannot determine a value, set it to null but provide your best guess
+- Focus on commercial real estate specifics, not general conversation
+- Respond ONLY with the JSON object, no additional text
+
+The user query to analyze is: "${userQuery}"`;
+
+        // Call the Gemini API with the specialized prompt
+        const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                contents: [
+                    {
+                        role: "user",
+                        parts: [{ text: featureExtractionPrompt }]
+                    }
+                ],
+                generationConfig: {
+                    temperature: 0.2,  // Lower temperature for more deterministic output
+                    maxOutputTokens: 800
+                }
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        // Extract the generated text
+        if (result.candidates && result.candidates.length > 0 && 
+            result.candidates[0].content && result.candidates[0].content.parts && 
+            result.candidates[0].content.parts.length > 0) {
+            
+            const generatedText = result.candidates[0].content.parts[0].text.trim();
+            debugLog("Received feature extraction response:", generatedText);
+            
+            // Parse the JSON response
+            try {
+                const extractedFeatures = JSON.parse(generatedText);
+                return extractedFeatures;
+            } catch (parseError) {
+                debugLog("Error parsing feature extraction JSON:", parseError.message);
+                throw new Error("Could not parse Gemini response as JSON");
+            }
+        }
+        
+        throw new Error("Could not extract features from Gemini response");
+    } catch (error) {
+        debugLog("Error in feature extraction:", error.message);
+        // Return null to indicate extraction failed, allowing fallback to regular extraction
+        return null;
+    }
+}
      
  // Call the Gemini API
 async function callGeminiAPI(userInput) {
@@ -1456,7 +1677,7 @@ ${propertiesText}`;
     }
 }
 
-// Improved sendMessage function
+// Improved sendMessage function with enhanced feature extraction
 async function sendMessage() {
     const userInput = document.getElementById('user-input');
     const inputText = userInput.value.trim();
@@ -1499,58 +1720,57 @@ async function sendMessage() {
         await loadProperties();
     }
 
-    // Extract criteria to check for people-based query
-    const criteria = extractSearchCriteria(inputText);
+    // Check if this is a follow-up question
+    const isFollowUp = isFollowUpQuestion(inputText);
+    debugLog("Is follow-up question:", isFollowUp);
     
-    // Check for specific "help me with size" query without a number
-    const isHelpWithSizeQuery = /help me with size|size help|help with sizing|pomoc s velikostí|pomoc s prostorem/i.test(inputText) && !criteria.peopleCount;
+    // Create search criteria with enhanced extraction
+    let criteria = {};
     
-    if (isHelpWithSizeQuery) {
-        // User asked for help with sizing but didn't specify a number of people
-        const helpMessage = isCzech(inputText)
-            ? "Rád vám pomůžu určit správnou velikost prostoru. Kolik lidí bude prostor využívat?"
-            : "I'd be happy to help you determine the right space size. How many people will be using the space?";
+    // If follow-up, start with previous criteria
+    if (isFollowUp && conversationState.currentSearchCriteria) {
+        criteria = {...conversationState.currentSearchCriteria};
+        debugLog("Using previous search criteria as base:", criteria);
         
-        if (document.getElementById('typing-indicator')) {
-            document.getElementById('typing-indicator').remove();
+        // For pagination requests, keep the same criteria but update offset
+        if (/more|další|show more|ukázat více/i.test(inputText)) {
+            conversationState.offset += 5; // Show next 5 results
+            debugLog("Pagination request - updating offset to:", conversationState.offset);
         }
-        
-        // Add message with size range buttons
-        const sizeRanges = [
-            { range: '0-10', labelCz: '0-10 lidí', labelEn: '0-10 people' },
-            { range: '11-20', labelCz: '11-20 lidí', labelEn: '11-20 people' },
-            { range: '21-50', labelCz: '21-50 lidí', labelEn: '21-50 people' },
-            { range: '51-100', labelCz: '51-100 lidí', labelEn: '51-100 people' },
-            { range: '100+', labelCz: 'Více než 100 lidí', labelEn: 'More than 100 people' }
-        ];
-        
-        let sizeRangeButtonsHTML = `<div class="suggestion-buttons">`;
-        sizeRanges.forEach(sizeRange => {
-            const label = isCzech(inputText) ? sizeRange.labelCz : sizeRange.labelEn;
-            let peopleCount;
-            
-            if (sizeRange.range === '0-10') {
-                peopleCount = 10; // Use the upper bound
-            } else if (sizeRange.range === '11-20') {
-                peopleCount = 20; // Use the upper bound
-            } else if (sizeRange.range === '21-50') {
-                peopleCount = 50; // Use the upper bound
-            } else if (sizeRange.range === '51-100') {
-                peopleCount = 100; // Use the upper bound
-            } else if (sizeRange.range === '100+') {
-                peopleCount = 150; // Use a reasonable value for 100+
-            }
-            
-            sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountClick(${peopleCount}, '${label}')">
-                ${label}
-            </button>`;
-        });
-        sizeRangeButtonsHTML += `</div>`;
-        
-        addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
-        conversationHistory.push({role: "assistant", content: helpMessage});
-        return;
+    } else {
+        // Reset offset for new searches
+        conversationState.offset = 0;
     }
+    
+    // Use enhanced extraction for new criteria
+    const newCriteria = await enhancedExtractSearchCriteria(inputText, isFollowUp ? criteria : null);
+    
+    // Merge with existing criteria, with new values taking precedence
+    criteria = {...criteria, ...newCriteria};
+    
+    // For requests to "show all" - start fresh with just the core criteria
+    if (/show all|share all|all properties|all units|všechny|všechny jednotky/i.test(inputText)) {
+        // Keep only the most important criteria (type, location, size) and reset pagination
+        const coreCriteria = {};
+        if (criteria.type) coreCriteria.type = criteria.type;
+        if (criteria.location) coreCriteria.location = criteria.location;
+        if (criteria.size) coreCriteria.size = criteria.size;
+        if (criteria.maxSize) coreCriteria.maxSize = criteria.maxSize;
+        if (criteria.minSize) coreCriteria.minSize = criteria.minSize;
+        
+        criteria = coreCriteria;
+        conversationState.offset = 0;
+        debugLog("'Show all' request - using core criteria only:", criteria);
+    }
+    
+    // IMPORTANT: Update the global conversation state with the new criteria
+    conversationState.currentSearchCriteria = {...criteria};
+    debugLog("Updated conversation state with new criteria:", conversationState.currentSearchCriteria);
+    
+    // Extract the implied features for explanation if present
+    const impliedFeatures = criteria.impliedFeatures;
+    // Remove from search criteria to avoid interfering with property matching
+    delete criteria.impliedFeatures;
     
     // If this is a people-based query, use Gemini to convert people to sqm
     if (criteria.peopleCount) {
@@ -2791,6 +3011,196 @@ function displaySearchResults(matchedProperties, criteria) {
     }, 500);
 }
 
+    // Function to display search results with enhanced explanations
+function displayEnhancedSearchResults(matchedProperties, criteria, impliedFeatures, userInput) {
+    // Add detailed logging about the criteria and results
+    debugLog("Displaying enhanced search results for criteria:", JSON.stringify(criteria));
+    debugLog(`Found ${matchedProperties.length} matching properties`);
+    
+    // Remove typing indicator
+    if (document.getElementById('typing-indicator')) {
+        document.getElementById('typing-indicator').remove();
+    }
+    
+    // Check if we have results
+    if (matchedProperties.length > 0) {
+        debugLog("Displaying positive search results with implied features");
+        
+        // Generate introduction text
+        const isCzechQuery = isCzech(userInput);
+        
+        // Provide more contextual responses based on filter changes
+        let response = "";
+        
+        // If we just cleared size restrictions, mention it specifically
+        if (criteria.clearSizeAction) {
+            response = isCzechQuery 
+                ? `Po odstranění filtru velikosti jsem našel ${matchedProperties.length} nemovitostí s těmito parametry:<br><br>`
+                : `After removing size restrictions, I found ${matchedProperties.length} properties with these parameters:<br><br>`;
+            
+            // Remove the flag after using it
+            delete criteria.clearSizeAction;
+        } else {
+            response = isCzechQuery 
+                ? `Našel jsem ${matchedProperties.length} nemovitostí s těmito parametry:<br><br>`
+                : `I found ${matchedProperties.length} properties with these parameters:<br><br>`;
+        }
+        
+        // Add explanation for implied features if available
+        if (impliedFeatures) {
+            const impliedExplanations = [];
+            
+            // Location explanation
+            if (impliedFeatures.location && !impliedFeatures.location.explicit && 
+                impliedFeatures.location.confidence !== "low") {
+                const explanation = isCzechQuery
+                    ? `Hledal jsem v lokalitě "${impliedFeatures.location.value}" (odvodil jsem to z "${impliedFeatures.location.reasoning}")`
+                    : `I searched in "${impliedFeatures.location.value}" (inferred from "${impliedFeatures.location.reasoning}")`;
+                impliedExplanations.push(explanation);
+            }
+            
+            // Property type explanation
+            if (impliedFeatures.propertyType && !impliedFeatures.propertyType.explicit && 
+                impliedFeatures.propertyType.confidence !== "low") {
+                const explanation = isCzechQuery
+                    ? `Hledal jsem "${impliedFeatures.propertyType.value}" prostory`
+                    : `I searched for "${impliedFeatures.propertyType.value}" spaces`;
+                impliedExplanations.push(explanation);
+            }
+            
+            // Size explanation
+            if (impliedFeatures.size && !impliedFeatures.size.explicit && 
+                impliedFeatures.size.confidence !== "low") {
+                const explanation = isCzechQuery
+                    ? `Použil jsem velikost ${impliedFeatures.size.value} m²`
+                    : `I used a size of ${impliedFeatures.size.value} sqm`;
+                impliedExplanations.push(explanation);
+            }
+            
+            // Add the explanations to the response if we have any
+            if (impliedExplanations.length > 0) {
+                response += `<div style="background-color: #f0f5ff; padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+                    <strong>${isCzechQuery ? 'Jak jsem porozuměl vašemu dotazu:' : 'How I understood your query:'}</strong><br>
+                    ${impliedExplanations.map(exp => `• ${exp}`).join('<br>')}
+                </div>`;
+            }
+        }
+        
+        // Add active filters section
+        response += generateActiveFiltersHTML(criteria, isCzechQuery);
+        
+        // Add property listings
+        response += generatePropertyListingHTML(matchedProperties, conversationState.offset, 5);
+        
+        // Add pagination (now with a button instead of text)
+        if (matchedProperties.length > 5) {
+            response += isCzechQuery
+                ? `<br>Zobrazuji ${conversationState.offset + 1}-${conversationState.offset + 5} z ${matchedProperties.length} nalezených nemovitostí.<br>`
+                : `<br>Showing ${conversationState.offset + 1}-${conversationState.offset + 5} of ${matchedProperties.length} matching properties.<br>`;
+            
+            // Add "Show More" button
+            response += `<div class="action-button-container">
+                <button class="action-button" onclick="handleShowMore()">${isCzechQuery ? 'Zobrazit další' : 'Show More'}</button>
+            </div>`;
+        } else {
+            response += isCzechQuery
+                ? `<br>Zobrazuji ${matchedProperties.length} z ${matchedProperties.length} nalezených nemovitostí.`
+                : `<br>Showing ${matchedProperties.length} of ${matchedProperties.length} matching properties.`;
+        }
+        
+        // Add refinement buttons
+        response += generateRefinementButtonsHTML(criteria, isCzechQuery);
+        
+        // Display the response
+        addMessage(response, 'bot');
+        conversationHistory.push({role: "assistant", content: response});
+    } else {
+        // No results found - handle this case similarly to the original code
+        // You can enhance this with suggested alternatives based on implied features
+        debugLog("No matching properties found");
+        
+        let noMatchResponse = "";
+        const isCzechQuery = isCzech(userInput);
+        
+        // Enhanced no results message with explanation
+        if (impliedFeatures) {
+            noMatchResponse = isCzechQuery
+                ? `Bohužel jsem nenašel žádné nemovitosti, které by odpovídaly vašemu požadavku.<br><br>`
+                : `I couldn't find any properties matching your requirements.<br><br>`;
+            
+            // Add explanation for what was searched
+            noMatchResponse += `<div style="background-color: #f0f5ff; padding: 10px; border-radius: 8px; margin-bottom: 15px;">
+                <strong>${isCzechQuery ? 'Jak jsem porozuměl vašemu dotazu:' : 'How I understood your query:'}</strong><br>`;
+            
+            if (impliedFeatures.location && impliedFeatures.location.value) {
+                noMatchResponse += `• ${isCzechQuery ? 'Lokalita' : 'Location'}: ${impliedFeatures.location.value}<br>`;
+            }
+            
+            if (impliedFeatures.propertyType && impliedFeatures.propertyType.value) {
+                noMatchResponse += `• ${isCzechQuery ? 'Typ nemovitosti' : 'Property type'}: ${impliedFeatures.propertyType.value}<br>`;
+            }
+            
+            if (impliedFeatures.size && impliedFeatures.size.value) {
+                noMatchResponse += `• ${isCzechQuery ? 'Velikost' : 'Size'}: ${impliedFeatures.size.value} ${isCzechQuery ? 'm²' : 'sqm'}<br>`;
+            }
+            
+            noMatchResponse += `</div>`;
+        } else {
+            noMatchResponse = isCzechQuery
+                ? `Bohužel jsem nenašel žádné nemovitosti, které by odpovídaly vašemu požadavku.`
+                : `I couldn't find any properties matching your requirements.`;
+        }
+        
+        // Add active filters section
+        noMatchResponse += generateActiveFiltersHTML(criteria, isCzechQuery);
+        
+        // Add suggestion to modify search with more targeted recommendations
+        noMatchResponse += isCzechQuery
+            ? `<p>Zkuste upravit vyhledávací kritéria pro více výsledků:</p>`
+            : `<p>Try modifying your search criteria for more results:</p>`;
+        
+        // Add buttons to relax search criteria (same as original code)
+        noMatchResponse += `<div class="suggestion-buttons">`;
+        
+        // Suggest clearing size filters if they exist
+        if (criteria.minSize || criteria.maxSize || criteria.size) {
+            noMatchResponse += `<button class="suggestion-button" onclick="handleRefinementClick('clearSize', '')">${isCzechQuery ? 'Odstranit omezení velikosti' : 'Remove size restrictions'}</button>`;
+        }
+        
+        // If availability is set to something other than "Any", suggest changing it
+        if (criteria.available && criteria.available.toLowerCase() !== 'any') {
+            noMatchResponse += `<button class="suggestion-button" onclick="handleRefinementClick('available', 'Any')">${isCzechQuery ? 'Jakákoli dostupnost' : 'Any availability'}</button>`;
+        }
+        
+        // More buttons to try different locations or types
+        if (criteria.type) {
+            const types = ['office', 'retail', 'industrial'].filter(t => t !== criteria.type);
+            types.forEach(type => {
+                const typeLabel = type === 'office' 
+                    ? (isCzechQuery ? 'Kanceláře' : 'Office')
+                    : type === 'retail' 
+                        ? (isCzechQuery ? 'Obchodní prostory' : 'Retail')
+                        : (isCzechQuery ? 'Průmyslové prostory' : 'Industrial');
+                
+                noMatchResponse += `<button class="suggestion-button" onclick="handleRefinementClick('type', '${type}')">${typeLabel}</button>`;
+            });
+        }
+        
+        if (criteria.location) {
+            const locations = ['Prague', 'Brno', 'Ostrava'].filter(l => !criteria.location.includes(l));
+            locations.forEach(location => {
+                noMatchResponse += `<button class="suggestion-button" onclick="handleRefinementClick('location', '${location}')">${location}</button>`;
+            });
+        }
+        
+        noMatchResponse += `</div>`;
+        
+        // Display the response
+        addMessage(noMatchResponse, 'bot');
+        conversationHistory.push({role: "assistant", content: noMatchResponse});
+    }
+}
+
 // Function to generate active filters HTML
 function generateActiveFiltersHTML(criteria, isCzechQuery) {
     let filtersHTML = '';
@@ -3315,6 +3725,9 @@ window.handleSizeHelpClickFromRefinement = handleSizeHelpClickFromRefinement;
 window.handlePeopleCountFromRefinement = handlePeopleCountFromRefinement;
 window.handleDirectPeopleClick = handleDirectPeopleClick;
 window.handleClearLocationFilter = handleClearLocationFilter;
+window.extractImpliedFeaturesWithGemini = extractImpliedFeaturesWithGemini;
+window.enhancedExtractSearchCriteria = enhancedExtractSearchCriteria;
+window.displayEnhancedSearchResults = displayEnhancedSearchResults;
 </script>
 </body>
 </html>  
