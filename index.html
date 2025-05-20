@@ -1872,16 +1872,17 @@ function handleSizeHelpClick() {
     addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
     conversationHistory.push({role: "assistant", content: helpMessage});
 }
-     // Fix for handleSizeHelpClickFromRefinement function
+// Fix for handleSizeHelpClickFromRefinement function
 function handleSizeHelpClickFromRefinement() {
-    debugLog("handleSizeHelpClickFromRefinement called"); // Add this debug line
+    debugLog("handleSizeHelpClickFromRefinement called");
+    
     // User asked for help with sizing
     const isCzechQuery = isCzech(document.getElementById('user-input').value);
     const helpMessage = isCzechQuery
         ? "Rád vám pomůžu určit správnou velikost prostoru. Kolik lidí bude prostor využívat?"
         : "I'd be happy to help you determine the right space size. How many people will be using the space?";
     
-    // Add the "Help me with size" message to the chat as if the user had asked it
+    // Add the user's query to the chat
     addMessage(isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size", 'user');
     conversationHistory.push({role: "user", content: isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size"});
     
@@ -1900,19 +1901,19 @@ function handleSizeHelpClickFromRefinement() {
         let peopleCount;
         
         if (sizeRange.range === '0-10') {
-            peopleCount = 10; // Use the upper bound
+            peopleCount = 10;
         } else if (sizeRange.range === '11-20') {
-            peopleCount = 20; // Use the upper bound
+            peopleCount = 20;
         } else if (sizeRange.range === '21-50') {
-            peopleCount = 50; // Use the upper bound
+            peopleCount = 50;
         } else if (sizeRange.range === '51-100') {
-            peopleCount = 100; // Use the upper bound
+            peopleCount = 100;
         } else if (sizeRange.range === '100+') {
-            peopleCount = 150; // Use a reasonable value for 100+
+            peopleCount = 150;
         }
         
-        // IMPORTANT FIX: Use handlePeopleCountClick instead of a different handler
-        sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountClick(${peopleCount}, '${label}')">
+        // Use a custom handler to ensure proper context
+        sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountFromRefinement(${peopleCount}, '${label}')">
             ${label}
         </button>`;
     });
@@ -1922,6 +1923,116 @@ function handleSizeHelpClickFromRefinement() {
     addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
     conversationHistory.push({role: "assistant", content: helpMessage});
 }
+
+// New handler specifically for people count selections from refinement
+function handlePeopleCountFromRefinement(peopleCount, displayText) {
+    // Add the user's selection to the chat
+    addMessage(displayText, 'user');
+    conversationHistory.push({role: "user", content: displayText});
+    
+    // Show typing indicator
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing-indicator';
+    typingIndicator.textContent = 'Typing...';
+    typingIndicator.id = 'typing-indicator';
+    document.getElementById('messages').appendChild(typingIndicator);
+    
+    // Process the people count
+    setTimeout(async () => {
+        try {
+            // Get current criteria
+            const currentCriteria = conversationState.currentSearchCriteria || {};
+            const spaceType = currentCriteria.type || "office";
+            
+            debugLog(`Converting ${peopleCount} people to sqm for ${spaceType} space`, currentCriteria);
+            
+            // Call Gemini API to convert people to sqm
+            const conversionResponse = await callGeminiAPIForPeopleConversion(peopleCount, spaceType);
+            
+            // Create criteria with the size range
+            const criteria = {...currentCriteria};
+            delete criteria.size; // Remove any size if present
+            criteria.minSize = conversionResponse.minSize;
+            criteria.maxSize = conversionResponse.maxSize;
+            
+            // Update conversation state
+            conversationState.currentSearchCriteria = criteria;
+            
+            // Remove typing indicator
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
+            }
+            
+            debugLog("Converted people to sqm:", criteria);
+            
+            // Search with the updated criteria
+            const matchedProperties = enhancedSearchProperties(criteria);
+            
+            if (matchedProperties.length > 0) {
+                // Format the explanation with the details from Gemini
+                const isCzechQuery = isCzech(displayText);
+                const conversionExplanation = isCzechQuery
+                    ? `Pro ${peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Zde jsou nemovitosti, které odpovídají těmto požadavkům:`
+                    : `For ${peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Here are the properties that match these requirements:`;
+                
+                // Generate property listings HTML
+                const propertyListingsHTML = generatePropertyListingHTML(matchedProperties, 0, 5);
+                
+                // Add pagination information
+                const paginationHTML = isCzechQuery
+                    ? `<br>Zobrazuji 1-${Math.min(5, matchedProperties.length)} z ${matchedProperties.length} nalezených nemovitostí.${matchedProperties.length > 5 ? '<br><div class="action-button-container"><button class="action-button" onclick="handleShowMore()">Zobrazit další</button></div>' : ''}`
+                    : `<br>Showing 1-${Math.min(5, matchedProperties.length)} of ${matchedProperties.length} matching properties.${matchedProperties.length > 5 ? '<br><div class="action-button-container"><button class="action-button" onclick="handleShowMore()">Show More</button></div>' : ''}`;
+                
+                // Add active filters
+                const filtersHTML = generateActiveFiltersHTML(criteria, isCzechQuery);
+                
+                // Add refinement buttons
+                const refinementHTML = generateRefinementButtonsHTML(criteria, isCzechQuery);
+                
+                // Combine everything
+                const fullResponse = conversionExplanation + "<br><br>" + propertyListingsHTML + paginationHTML + filtersHTML + refinementHTML;
+                
+                // Update last shown properties
+                conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
+                
+                // Reset pagination offset
+                conversationState.offset = 0;
+                
+                // Display the response
+                addMessage(fullResponse, 'bot');
+                conversationHistory.push({role: "assistant", content: fullResponse});
+            } else {
+                // No matching properties found
+                const isCzechQuery = isCzech(displayText);
+                const noMatchResponse = isCzechQuery
+                    ? `Pro ${peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Bohužel jsem nenašel žádné nemovitosti, které přesně odpovídají těmto parametrům. Zkuste prosím upravit kritéria vyhledávání nebo se podívat na alternativy.`
+                    : `For ${peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Unfortunately, I couldn't find any properties that exactly match these parameters. Please try adjusting your search criteria or looking at alternatives.`;
+                
+                // Display the response
+                addMessage(noMatchResponse, 'bot');
+                conversationHistory.push({role: "assistant", content: noMatchResponse});
+            }
+        } catch (error) {
+            debugLog("Error processing people count from refinement:", error.message);
+            
+            // Remove typing indicator
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
+            }
+            
+            // Display error message
+            const errorMessage = isCzech(displayText)
+                ? "Omlouvám se, ale došlo k chybě při zpracování vašeho požadavku. Zkuste prosím zadat počet lidí přímo ve vašem dotazu, například: 'Potřebuji kancelář pro 50 lidí'."
+                : "I'm sorry, but there was an error processing your request. Please try specifying the number of people directly in your query, for example: 'I need an office for 50 people'.";
+            
+            addMessage(errorMessage, 'bot');
+            conversationHistory.push({role: "assistant", content: errorMessage});
+        }
+    }, 1000);
+}
+
+// Make sure to add the function to the window object so it can be called from onclick
+window.handlePeopleCountFromRefinement = handlePeopleCountFromRefinement;
      
 // Function to handle people count button click
 function handlePeopleCountClick(peopleCount, displayText) {
@@ -3001,7 +3112,8 @@ window.startProgressiveConversation = startProgressiveConversation;
 window.handleProgressiveAnswer = handleProgressiveAnswer;
 window.handlePeopleCountClick = handlePeopleCountClick;
 window.showPragueDistrictOptions = showPragueDistrictOptions; 
-window.handleSizeHelpClickFromRefinement = handleSizeHelpClickFromRefinement; // Add this line
+window.handleSizeHelpClickFromRefinement = handleSizeHelpClickFromRefinement;
+window.handlePeopleCountFromRefinement = handlePeopleCountFromRefinement;
 </script>
 </body>
 </html>  
