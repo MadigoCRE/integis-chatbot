@@ -2526,6 +2526,87 @@ function handleRefinementClick(refinementType, value) {
     displaySearchResults(searchResults, criteria);
 }
 
+  // Function to handle clearing location filter
+function handleClearLocationFilter() {
+    // Get current criteria
+    let criteria = {...conversationState.currentSearchCriteria} || {};
+    
+    // Log the criteria before any changes
+    debugLog("Current criteria before clearing location:", JSON.stringify(criteria));
+    
+    // Get the current location to display in user message
+    const currentLocation = criteria.location || '';
+    
+    // Remove location-related fields
+    delete criteria.location;
+    
+    // Reset pagination offset
+    conversationState.offset = 0;
+    
+    // Update conversation state
+    conversationState.currentSearchCriteria = criteria;
+    
+    // Generate a message to show what we're doing
+    const isCzechQuery = isCzech(document.getElementById('user-input').value);
+    const clearLocationText = isCzechQuery 
+        ? `Změnit lokalitu z ${currentLocation}`
+        : `Change location from ${currentLocation}`;
+    
+    // Add user message
+    addMessage(clearLocationText, 'user');
+    conversationHistory.push({role: "user", content: clearLocationText});
+    
+    // Log the final criteria we're searching with
+    debugLog("About to search with location cleared:", JSON.stringify(criteria));
+    
+    // Show typing indicator
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing-indicator';
+    typingIndicator.textContent = 'Typing...';
+    typingIndicator.id = 'typing-indicator';
+    document.getElementById('messages').appendChild(typingIndicator);
+    
+    // Short timeout to show the typing indicator
+    setTimeout(() => {
+        if (document.getElementById('typing-indicator')) {
+            document.getElementById('typing-indicator').remove();
+        }
+        
+        // Prepare the location selection buttons
+        const locationMessage = isCzechQuery
+            ? "Vyberte lokalitu:"
+            : "Select a location:";
+        
+        // Create buttons for all locations
+        let locationButtons = `<div class="refinement-buttons">
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague')">Prague</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Brno')">Brno</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Ostrava')">Ostrava</button>
+        </div>`;
+        
+        // Add Prague district buttons for more specific selection
+        locationButtons += `<div style="width:100%; margin: 10px 0 5px; font-size:12px; color:#666;">
+            ${isCzechQuery ? 'Praha - městské části:' : 'Prague districts:'}
+        </div>
+        <div class="refinement-buttons">
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 1')">Prague 1</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 2')">Prague 2</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 3')">Prague 3</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 4')">Prague 4</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 5')">Prague 5</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 6')">Prague 6</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 7')">Prague 7</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 8')">Prague 8</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 9')">Prague 9</button>
+            <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 10')">Prague 10</button>
+        </div>`;
+        
+        // Display the response
+        addMessage(locationMessage + "<br><br>" + locationButtons, 'bot');
+        conversationHistory.push({role: "assistant", content: locationMessage});
+    }, 500);
+}  
+
 // Function to get readable criteria text
 function getReadableCriteria(type, value, isCzechLanguage) {
     if (isCzechLanguage) {
@@ -2760,7 +2841,7 @@ function generateActiveFiltersHTML(criteria, isCzechQuery) {
     
     return filtersHTML;
 }
-   // Function to generate refinement buttons HTML
+  // Function to generate refinement buttons HTML
 function generateRefinementButtonsHTML(criteria, isCzechQuery) {
     let buttonsHTML = `<div class="refinement-buttons">
         <div style="width:100%; margin-bottom:5px; font-size:12px; color:#666;">
@@ -2813,7 +2894,7 @@ function generateRefinementButtonsHTML(criteria, isCzechQuery) {
         </button>`;
     }
     
-    // Location refinements (if not already specified)
+    // Location refinements
     if (!criteria.location) {
         buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('location', 'Prague')">Prague</button>
         <button class="refinement-button" onclick="handleRefinementClick('location', 'Brno')">Brno</button>
@@ -2831,6 +2912,16 @@ function generateRefinementButtonsHTML(criteria, isCzechQuery) {
         <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 8')">Prague 8</button>
         <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 9')">Prague 9</button>
         <button class="refinement-button" onclick="handleRefinementClick('location', 'Prague 10')">Prague 10</button>`;
+    } else if (criteria.location && criteria.location.includes('Prague ')) {
+        // Add "Change location" button when a specific Prague district is selected
+        buttonsHTML += `<button class="refinement-button" onclick="handleClearLocationFilter()">
+            ${isCzechQuery ? 'Změnit lokalitu' : 'Change location'}
+        </button>`;
+    } else if (criteria.location) {
+        // Add "Change location" button for other locations (Brno, Ostrava)
+        buttonsHTML += `<button class="refinement-button" onclick="handleClearLocationFilter()">
+            ${isCzechQuery ? 'Změnit lokalitu' : 'Change location'}
+        </button>`;
     }
     
     // Availability refinement
@@ -2844,7 +2935,6 @@ function generateRefinementButtonsHTML(criteria, isCzechQuery) {
     
     return buttonsHTML;
 }
-
 // Function to generate suggestion buttons HTML - UPDATED
 function generateSuggestionButtonsHTML(criteria, isCzechQuery) {
     // Check if this is at the end of a guided search flow
@@ -3224,6 +3314,7 @@ window.showPragueDistrictOptions = showPragueDistrictOptions;
 window.handleSizeHelpClickFromRefinement = handleSizeHelpClickFromRefinement;
 window.handlePeopleCountFromRefinement = handlePeopleCountFromRefinement;
 window.handleDirectPeopleClick = handleDirectPeopleClick;
+window.handleClearLocationFilter = handleClearLocationFilter;
 </script>
 </body>
 </html>  
