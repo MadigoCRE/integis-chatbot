@@ -626,36 +626,67 @@ async function enhancedExtractSearchCriteria(userInput, previousCriteria = null)
     // First, try to extract implied features using Gemini
     const impliedFeatures = await extractImpliedFeaturesWithGemini(userInput);
     
-    // Also extract criteria using traditional method as backup
+    // Also extract criteria using traditional method
     const traditionalCriteria = extractSearchCriteria(userInput, previousCriteria);
+    debugLog("Traditional criteria extracted:", traditionalCriteria);
     
-    // If Gemini extraction completely failed, use traditional method
+    // If Gemini extraction failed, just use traditional method
     if (!impliedFeatures) {
         debugLog("Using only traditional criteria extraction (Gemini failed)");
         return traditionalCriteria;
     }
     
+    debugLog("Successfully received implied features from Gemini:", impliedFeatures);
+    
     // Start with previous criteria if available
     let enhancedCriteria = {...previousCriteria} || {};
     
-    // Apply implied features from AI
+    // Apply implied features with priority logic
+    
+    // 1. Handle property type
     if (impliedFeatures.propertyType) {
         enhancedCriteria.type = impliedFeatures.propertyType;
         debugLog(`Using AI-detected property type: ${impliedFeatures.propertyType}`);
     }
     
+    // 2. Handle location with priority logic
     if (impliedFeatures.location) {
-        enhancedCriteria.location = impliedFeatures.location;
-        debugLog(`Using AI-detected location: ${impliedFeatures.location}`);
+        const aiLocation = impliedFeatures.location;
+        const traditionalLocation = traditionalCriteria.location;
+        
+        // IMPORTANT: If AI detected a specific Prague district, use it
+        if (aiLocation.match(/Prague \d+/i)) {
+            // AI detected a specific district
+            if (!traditionalLocation || traditionalLocation === "Prague") {
+                // Traditional extraction found no location or just "Prague"
+                enhancedCriteria.location = aiLocation;
+                debugLog(`Using AI-detected specific district: ${aiLocation} over general Prague`);
+            } else if (traditionalLocation.match(/Prague \d+/i)) {
+                // Both found specific districts, use traditional as it's explicitly mentioned
+                enhancedCriteria.location = traditionalLocation;
+                debugLog(`Using explicitly mentioned district: ${traditionalLocation}`);
+            } else {
+                // Traditional found a non-Prague location, use that for explicit priority
+                enhancedCriteria.location = traditionalLocation;
+                debugLog(`Using explicitly mentioned location: ${traditionalLocation}`);
+            }
+        } else {
+            // AI didn't detect a specific district, prefer traditional
+            enhancedCriteria.location = traditionalLocation || aiLocation;
+            debugLog(`Using location: ${enhancedCriteria.location}`);
+        }
     }
     
+    // 3. Handle size
     if (impliedFeatures.size) {
         // Check if it's a range
-        if (impliedFeatures.size.includes('-')) {
-            const [min, max] = impliedFeatures.size.split('-');
-            enhancedCriteria.minSize = min;
-            enhancedCriteria.maxSize = max;
-            debugLog(`Using AI-detected size range: ${min}-${max} sqm`);
+        if (typeof impliedFeatures.size === 'string' && impliedFeatures.size.includes('-')) {
+            const [min, max] = impliedFeatures.size.split('-').map(s => parseInt(s.trim()));
+            if (!isNaN(min) && !isNaN(max)) {
+                enhancedCriteria.minSize = min.toString();
+                enhancedCriteria.maxSize = max.toString();
+                debugLog(`Using AI-detected size range: ${min}-${max} sqm`);
+            }
         } else {
             enhancedCriteria.size = impliedFeatures.size;
             debugLog(`Using AI-detected size: ${impliedFeatures.size} sqm`);
@@ -665,14 +696,38 @@ async function enhancedExtractSearchCriteria(userInput, previousCriteria = null)
     // Store original AI response for explanation
     enhancedCriteria.impliedFeatures = impliedFeatures;
     
-    // Apply explicit criteria from traditional extraction to override any AI mistakes
-    // This ensures explicit mentions always take precedence
-    if (traditionalCriteria.type) enhancedCriteria.type = traditionalCriteria.type;
-    if (traditionalCriteria.location) enhancedCriteria.location = traditionalCriteria.location;
-    if (traditionalCriteria.size) enhancedCriteria.size = traditionalCriteria.size;
-    if (traditionalCriteria.minSize) enhancedCriteria.minSize = traditionalCriteria.minSize;
-    if (traditionalCriteria.maxSize) enhancedCriteria.maxSize = traditionalCriteria.maxSize;
-    if (traditionalCriteria.available) enhancedCriteria.available = traditionalCriteria.available;
+    // Now apply explicit criteria from traditional extraction only for truly explicit values
+    // This ensures the AI's smarter interpretations aren't always overridden
+    
+    // For type, traditional should override only if it explicitly found a type
+    if (traditionalCriteria.type) {
+        enhancedCriteria.type = traditionalCriteria.type;
+        debugLog(`Overriding with explicitly mentioned type: ${traditionalCriteria.type}`);
+    }
+    
+    // Size overrides are straightforward
+    if (traditionalCriteria.size) {
+        enhancedCriteria.size = traditionalCriteria.size;
+        debugLog(`Overriding with explicitly mentioned size: ${traditionalCriteria.size}`);
+    }
+    if (traditionalCriteria.minSize) {
+        enhancedCriteria.minSize = traditionalCriteria.minSize;
+        if (traditionalCriteria.maxSize) {
+            enhancedCriteria.maxSize = traditionalCriteria.maxSize;
+            debugLog(`Overriding with explicitly mentioned size range: ${traditionalCriteria.minSize}-${traditionalCriteria.maxSize}`);
+        } else {
+            debugLog(`Overriding with explicitly mentioned min size: ${traditionalCriteria.minSize}`);
+        }
+    } else if (traditionalCriteria.maxSize) {
+        enhancedCriteria.maxSize = traditionalCriteria.maxSize;
+        debugLog(`Overriding with explicitly mentioned max size: ${traditionalCriteria.maxSize}`);
+    }
+    
+    // Availability is straightforward
+    if (traditionalCriteria.available) {
+        enhancedCriteria.available = traditionalCriteria.available;
+        debugLog(`Using explicitly mentioned availability: ${traditionalCriteria.available}`);
+    }
     
     debugLog("Final enhanced criteria:", enhancedCriteria);
     return enhancedCriteria;
