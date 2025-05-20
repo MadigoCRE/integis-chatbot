@@ -1183,6 +1183,126 @@ function generateLocalResponse(userInput) {
 }
 
 // Enhanced function to call Gemini API specifically for people to sqm conversion
+async function callGeminiAPIForPeopleConversion(peopleCount, spaceType = "office") {
+    debugLog("Calling Gemini API to convert people count to sqm");
+    
+    try {
+        // Format the prompt for Gemini
+        const conversionPrompt = `
+        You are a commercial real estate expert. Convert number of people to square meters needed for ${spaceType} space.
+        Be realistic and follow these guidelines:
+        - For office space: typically 8-12 sqm per person for standard offices, 15-20 sqm for executive space
+        - For retail: depends on type but generally 15-40 sqm per staff member
+        - For industrial: typically 25-50 sqm per worker depending on operations
+        
+        For ${peopleCount} people in a ${spaceType} space, provide:
+        1. The minimum and maximum sqm required as a range
+        2. A short explanation about why this amount of space is appropriate
+        3. Additional considerations like meeting rooms, common areas, etc.
+        
+        Format your response EXACTLY as a JSON object with these properties:
+        {
+          "minSize": number,
+          "maxSize": number,
+          "explanation": "brief explanation text",
+          "considerations": "brief additional considerations"
+        }
+        
+        Do not include any markdown formatting, code blocks, or any text outside of the JSON object.
+        Just return the plain JSON object and nothing else.
+        `;
+        
+        // Call the Gemini API
+        const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                contents: [
+                    {
+                        role: "user",
+                        parts: [{ text: conversionPrompt }]
+                    }
+                ],
+                generationConfig: {
+                    temperature: 0.2,  // Lower temperature for more deterministic output
+                    maxOutputTokens: 400
+                }
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        // Extract the generated text
+        if (result.candidates && result.candidates.length > 0 && 
+            result.candidates[0].content && result.candidates[0].content.parts && 
+            result.candidates[0].content.parts.length > 0) {
+            
+            const generatedText = result.candidates[0].content.parts[0].text.trim();
+            debugLog("Received conversion response:", generatedText);
+            
+            // IMPORTANT FIX: Clean the response text of any markdown formatting
+            let cleanedText = generatedText;
+            
+            // Remove markdown code block indicators if present
+            if (cleanedText.startsWith("```")) {
+                cleanedText = cleanedText.replace(/```json\s+/, "").replace(/```\s*$/, "");
+            }
+            
+            // Parse the JSON response
+            try {
+                const conversion = JSON.parse(cleanedText);
+                if (conversion.minSize && conversion.maxSize) {
+                    return {
+                        minSize: Math.round(conversion.minSize),
+                        maxSize: Math.round(conversion.maxSize),
+                        explanation: conversion.explanation || "This size range is appropriate based on commercial real estate standards.",
+                        considerations: conversion.considerations || "Consider meeting rooms, break areas, and circulation space."
+                    };
+                }
+            } catch (parseError) {
+                debugLog("Error parsing conversion JSON:", parseError.message);
+                // Try to extract numbers from the text if JSON parsing fails
+                const numbers = cleanedText.match(/\d+/g);
+                if (numbers && numbers.length >= 2) {
+                    return {
+                        minSize: Math.round(parseInt(numbers[0])),
+                        maxSize: Math.round(parseInt(numbers[1])),
+                        explanation: "This size range is based on industry standards.",
+                        considerations: "Consider additional space for amenities and common areas."
+                    };
+                }
+            }
+        }
+        
+        throw new Error("Could not extract size conversion from Gemini response");
+    } catch (error) {
+        debugLog("Error in people to sqm conversion:", error.message);
+        // Provide a fallback conversion based on standard metrics
+        const fallbackSizes = {
+            "office": { min: Math.round(peopleCount * 8), max: Math.round(peopleCount * 12) },
+            "retail": { min: Math.round(peopleCount * 15), max: Math.round(peopleCount * 40) },
+            "industrial": { min: Math.round(peopleCount * 25), max: Math.round(peopleCount * 50) }
+        };
+        
+        const fallback = fallbackSizes[spaceType] || fallbackSizes.office;
+        debugLog("Using fallback conversion:", fallback);
+        
+        return {
+            minSize: fallback.min,
+            maxSize: fallback.max,
+            explanation: `Based on industry standards, we typically allocate ${fallback.min/peopleCount}-${fallback.max/peopleCount} sqm per person for ${spaceType} space.`,
+            considerations: `For ${peopleCount} people, consider additional space for meeting rooms, reception areas, and circulation space.`
+        };
+    }
+}
+
+     
  // Call the Gemini API
 async function callGeminiAPI(userInput) {
     debugLog("Starting Gemini API call for input:", userInput);
@@ -1911,6 +2031,7 @@ function handlePeopleCountFromRefinement(peopleCount, displayText) {
     }, 1000);
 }
 
+// Add this function after any of your existing handler functions
 function handleDirectPeopleClick(peopleCount, displayText) {
     debugLog(`handleDirectPeopleClick called with count=${peopleCount}, text=${displayText}`);
     
