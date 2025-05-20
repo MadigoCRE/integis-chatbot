@@ -1872,6 +1872,53 @@ function handleSizeHelpClick() {
     addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
     conversationHistory.push({role: "assistant", content: helpMessage});
 }
+     function handleSizeHelpClickFromRefinement() {
+    // User asked for help with sizing
+    const isCzechQuery = isCzech(document.getElementById('user-input').value);
+    const helpMessage = isCzechQuery
+        ? "Rád vám pomůžu určit správnou velikost prostoru. Kolik lidí bude prostor využívat?"
+        : "I'd be happy to help you determine the right space size. How many people will be using the space?";
+    
+    // Add the "Help me with size" message to the chat as if the user had asked it
+    addMessage(isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size", 'user');
+    conversationHistory.push({role: "user", content: isCzechQuery ? "Pomoc s výběrem velikosti" : "Help me with size"});
+    
+    // Add size range buttons
+    const sizeRanges = [
+        { range: '0-10', labelCz: '0-10 lidí', labelEn: '0-10 people' },
+        { range: '11-20', labelCz: '11-20 lidí', labelEn: '11-20 people' },
+        { range: '21-50', labelCz: '21-50 lidí', labelEn: '21-50 people' },
+        { range: '51-100', labelCz: '51-100 lidí', labelEn: '51-100 people' },
+        { range: '100+', labelCz: 'Více než 100 lidí', labelEn: 'More than 100 people' }
+    ];
+    
+    let sizeRangeButtonsHTML = `<div class="suggestion-buttons">`;
+    sizeRanges.forEach(sizeRange => {
+        const label = isCzechQuery ? sizeRange.labelCz : sizeRange.labelEn;
+        let peopleCount;
+        
+        if (sizeRange.range === '0-10') {
+            peopleCount = 10; // Use the upper bound
+        } else if (sizeRange.range === '11-20') {
+            peopleCount = 20; // Use the upper bound
+        } else if (sizeRange.range === '21-50') {
+            peopleCount = 50; // Use the upper bound
+        } else if (sizeRange.range === '51-100') {
+            peopleCount = 100; // Use the upper bound
+        } else if (sizeRange.range === '100+') {
+            peopleCount = 150; // Use a reasonable value for 100+
+        }
+        
+        sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountClick(${peopleCount}, '${label}')">
+            ${label}
+        </button>`;
+    });
+    sizeRangeButtonsHTML += `</div>`;
+    
+    // Display the help message with size range buttons
+    addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
+    conversationHistory.push({role: "assistant", content: helpMessage});
+}
      
 // Function to handle people count button click
 function handlePeopleCountClick(peopleCount, displayText) {
@@ -2500,7 +2547,7 @@ function generateRefinementButtonsHTML(criteria, isCzechQuery) {
     // Size refinements - UPDATED to match the guided search
     if (!criteria.minSize && !criteria.maxSize) {
         // Add size options that match the guided search
-        buttonsHTML += `<button class="refinement-button" onclick="handleSizeHelpClick()">
+        buttonsHTML += `<button class="refinement-button" onclick="handleSizeHelpClickFromRefinement()">
             ${isCzechQuery ? 'Pomoc s výběrem velikosti' : 'Help me with size'}
         </button>`;
             
@@ -2953,6 +3000,8 @@ window.handleShowMore = handleShowMore;
 window.startProgressiveConversation = startProgressiveConversation;
 window.handleProgressiveAnswer = handleProgressiveAnswer;
 window.handlePeopleCountClick = handlePeopleCountClick;
+window.showPragueDistrictOptions = showPragueDistrictOptions; 
+window.handleSizeHelpClickFromRefinement = handleSizeHelpClickFromRefinement; // Add this line
 </script>
 </body>
 </html>  
