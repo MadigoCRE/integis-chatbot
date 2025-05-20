@@ -1873,6 +1873,7 @@ function handleSizeHelpClick() {
     conversationHistory.push({role: "assistant", content: helpMessage});
 }
      function handleSizeHelpClickFromRefinement() {
+    debugLog("handleSizeHelpClickFromRefinement called"); // Add this debug line
     // User asked for help with sizing
     const isCzechQuery = isCzech(document.getElementById('user-input').value);
     const helpMessage = isCzechQuery
@@ -2548,7 +2549,7 @@ function generateRefinementButtonsHTML(criteria, isCzechQuery) {
     if (!criteria.minSize && !criteria.maxSize) {
         // Add size options that match the guided search
         buttonsHTML += `<button class="refinement-button" onclick="handleSizeHelpClickFromRefinement()">
-            ${isCzechQuery ? 'Pomoc s výběrem velikosti' : 'Help me with size'}
+        ${isCzechQuery ? 'Pomoc s výběrem velikosti' : 'Help me with size'}
         </button>`;
             
         buttonsHTML += `<button class="refinement-button" onclick="handleRefinementClick('maxSize', '100')">
@@ -2793,9 +2794,6 @@ function handleShowMore() {
                 ? `<br>Zobrazuji ${conversationState.offset + 1}-${matchedProperties.length} z ${matchedProperties.length} nalezených nemovitostí.`
                 : `<br>Showing ${conversationState.offset + 1}-${matchedProperties.length} of ${matchedProperties.length} matching properties.`;
         }
-        
-        // Add suggestion buttons
-        response += generateSuggestionButtonsHTML(criteria, isCzechQuery);
         
         // Display the response
         addMessage(response, 'bot');
