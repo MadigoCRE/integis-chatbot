@@ -1872,7 +1872,8 @@ function handleSizeHelpClick() {
     addMessage(helpMessage + "<br><br>" + sizeRangeButtonsHTML, 'bot');
     conversationHistory.push({role: "assistant", content: helpMessage});
 }
-     function handleSizeHelpClickFromRefinement() {
+     // Fix for handleSizeHelpClickFromRefinement function
+function handleSizeHelpClickFromRefinement() {
     debugLog("handleSizeHelpClickFromRefinement called"); // Add this debug line
     // User asked for help with sizing
     const isCzechQuery = isCzech(document.getElementById('user-input').value);
@@ -1910,6 +1911,7 @@ function handleSizeHelpClick() {
             peopleCount = 150; // Use a reasonable value for 100+
         }
         
+        // IMPORTANT FIX: Use handlePeopleCountClick instead of a different handler
         sizeRangeButtonsHTML += `<button class="suggestion-button" onclick="handlePeopleCountClick(${peopleCount}, '${label}')">
             ${label}
         </button>`;
