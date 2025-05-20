@@ -1799,41 +1799,8 @@ async function sendMessage() {
                 const matchedProperties = enhancedSearchProperties(criteria);
                 
                 if (matchedProperties.length > 0) {
-                    // Format the explanation with the details from Gemini
-                    const conversionExplanation = isCzech(inputText)
-                        ? `Pro ${criteria.peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Zde jsou nemovitosti, které odpovídají těmto požadavkům:`
-                        : `For ${criteria.peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Here are the properties that match these requirements:`;
-                    
-                    // Generate property listings HTML
-                    const propertyListingsHTML = generatePropertyListingHTML(matchedProperties, conversationState.offset, 5);
-                    
-                    // Add pagination information
-                    const paginationHTML = isCzech(inputText)
-                        ? `<br>Zobrazuji 1-${Math.min(5, matchedProperties.length)} z ${matchedProperties.length} nalezených nemovitostí.${matchedProperties.length > 5 ? '<br><div class="action-button-container"><button class="action-button" onclick="handleShowMore()">Zobrazit další</button></div>' : ''}`
-                        : `<br>Showing 1-${Math.min(5, matchedProperties.length)} of ${matchedProperties.length} matching properties.${matchedProperties.length > 5 ? '<br><div class="action-button-container"><button class="action-button" onclick="handleShowMore()">Show More</button></div>' : ''}`;
-                    
-                    // Add active filters
-                    const filtersHTML = generateActiveFiltersHTML(criteria, isCzech(inputText));
-                    
-                    // Add refinement buttons
-                    const refinementHTML = generateRefinementButtonsHTML(criteria, isCzech(inputText));
-                    
-                    // Add suggestion buttons
-                    const suggestionHTML = generateSuggestionButtonsHTML(criteria, isCzech(inputText));
-                    
-                    // Combine everything
-                    const fullResponse = conversionExplanation + "<br><br>" + propertyListingsHTML + paginationHTML + filtersHTML + refinementHTML + suggestionHTML;
-                    
-                    // Display the response
-                    if (document.getElementById('typing-indicator')) {
-                        document.getElementById('typing-indicator').remove();
-                    }
-                    
-                    // Update last shown properties
-                    conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
-                    
-                    addMessage(fullResponse, 'bot');
-                    conversationHistory.push({role: "assistant", content: fullResponse});
+                    // Use the enhanced display function for consistency
+                    displayEnhancedSearchResults(matchedProperties, criteria, impliedFeatures, inputText);
                     return;
                 } else {
                     // No matching properties found
@@ -1856,32 +1823,28 @@ async function sendMessage() {
         }
     }
 
-    // STRATEGY: First generate a local response that we can fall back to
-    const fallbackResponse = generateLocalResponse(inputText);
-    debugLog("Generated fallback response");
+    // Search for properties using the enhanced criteria
+    const matchedProperties = enhancedSearchProperties(criteria);
     
-    // If our fallback found property matches, prioritize it for instant response
-    const containsPropertyItems = fallbackResponse.includes("property-item");
-    
-    if (containsPropertyItems) {
-        debugLog("Fallback contains property matches, using it immediately");
-        if (document.getElementById('typing-indicator')) {
-            document.getElementById('typing-indicator').remove();
-        }
+    // Store the properties we've shown for follow-up questions
+    if (matchedProperties.length > 0) {
+        const propertiesToShow = matchedProperties.slice(
+            conversationState.offset, 
+            conversationState.offset + 5
+        );
         
-        // Save this response to conversation state
-        conversationState.lastResponse = fallbackResponse;
+        // Update last shown properties
+        conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
+        debugLog("Updated last shown properties:", conversationState.lastShownProperties);
         
-        addMessage(fallbackResponse, 'bot');
-        
-        // Add to conversation history
-        conversationHistory.push({role: "assistant", content: fallbackResponse});
+        // Use the enhanced display function
+        displayEnhancedSearchResults(matchedProperties, criteria, impliedFeatures, inputText);
         return;
     }
     
-    // If fallback didn't find properties, try Gemini API
+    // If we didn't find any properties with the enhanced criteria, try Gemini API for a more conversational response
     try {
-        debugLog("Attempting to use Gemini API");
+        debugLog("No matches found with enhanced criteria, using Gemini API for conversational response");
         // Try to call Gemini API with timeout
         const apiPromise = callGeminiAPI(inputText);
         const timeoutPromise = new Promise((_, reject) => 
@@ -1906,21 +1869,17 @@ async function sendMessage() {
         // Add to conversation history
         conversationHistory.push({role: "assistant", content: aiResponse});
     } catch (error) {
-        // Use the fallback response we already generated
-        debugLog("Error calling AI, using fallback:", error.message);
+        // If Gemini API fails, show a simple "no properties found" message using the enhanced display
+        debugLog("Error calling AI, displaying simple no matches response:", error.message);
         if (document.getElementById('typing-indicator')) {
             document.getElementById('typing-indicator').remove();
         }
         
-        // Save this response to conversation state
-        conversationState.lastResponse = fallbackResponse;
-        
-        addMessage(fallbackResponse, 'bot');
-        
-        // Add to conversation history
-        conversationHistory.push({role: "assistant", content: fallbackResponse});
+        // Display no results with enhanced features explanation
+        displayEnhancedSearchResults([], criteria, impliedFeatures, inputText);
     }
 }
+     
 // Function to add a message to the chat
 function addMessage(text, sender) {
     const messagesDiv = document.getElementById('messages');
