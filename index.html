@@ -520,10 +520,27 @@
      // Extract search criteria from user input
 function extractSearchCriteria(userInput, previousCriteria = null) {
     debugLog("Extracting search criteria from:", userInput);
-    let criteria = previousCriteria ? {...previousCriteria} : {};
     
-    // Extract location
-    if (/prague|praha/i.test(userInput)) {
+    // Create a fresh criteria object - only copy basic criteria, not impliedFeatures
+    let criteria = {};
+    if (previousCriteria) {
+        // Only copy direct criteria, not the impliedFeatures
+        const { impliedFeatures, ...directCriteria } = previousCriteria;
+        criteria = {...directCriteria};
+    }
+    
+    // Special handling for airport mentions - add before other location logic
+    if (/\bairport\b|\bletiště\b/i.test(userInput)) {
+        criteria.location = "Prague 6";
+        debugLog("Detected airport reference, setting location to Prague 6");
+    }
+    // Special handling for city center mentions
+    else if (/\bcity center\b|\bcentre\b|\bcentrum\b|\bdowntown\b/i.test(userInput)) {
+        criteria.location = "Prague 1";
+        debugLog("Detected city center reference, setting location to Prague 1");
+    }
+    // Regular location extraction
+    else if (/prague|praha/i.test(userInput)) {
         // Handle Prague and its districts
         criteria.location = "Prague";
         
@@ -556,11 +573,11 @@ function extractSearchCriteria(userInput, previousCriteria = null) {
     }
     
     // Extract property type
-    if (/office|kancelář/i.test(userInput)) {
+    if (/\boffice\b|\bkancelář\b/i.test(userInput)) {
         criteria.type = "office";
-    } else if (/retail|obchod/i.test(userInput)) {
+    } else if (/\bretail\b|\bobchod\b/i.test(userInput)) {
         criteria.type = "retail";
-    } else if (/industrial|průmysl|sklad/i.test(userInput)) {
+    } else if (/\bindustrial\b|\bsklad\b|\bprůmysl\b/i.test(userInput)) {
         criteria.type = "industrial";
     }
     
@@ -590,21 +607,26 @@ function extractSearchCriteria(userInput, previousCriteria = null) {
         // If no "between" pattern, check for individual size specifications
         
         // Check for size
-        const sizeMatch = userInput.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2|metr)/i);
+        const sizeMatch = userInput.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2|metr)/i) || 
+                         userInput.match(/(?:about|around|approximately|přibližně|kolem)\s+(\d+)/i);
+        
         if (sizeMatch) {
             criteria.size = sizeMatch[1];
+            debugLog(`Detected size: ${criteria.size} sqm`);
         }
         
         // Check for "less than" or "under" size specification
         const underSizeMatch = userInput.match(/(?:less than|under|smaller than|max|maximum|do|méně než|pod|maximálně)\s*(\d+)/i);
         if (underSizeMatch) {
             criteria.maxSize = underSizeMatch[1];
+            debugLog(`Detected max size: ${criteria.maxSize} sqm`);
         }
         
         // Check for "more than" or "over" size specification
         const overSizeMatch = userInput.match(/(?:more than|over|larger than|min|minimum|nad|více než|minimálně)\s*(\d+)/i);
         if (overSizeMatch) {
             criteria.minSize = overSizeMatch[1];
+            debugLog(`Detected min size: ${criteria.minSize} sqm`);
         }
     }
     
@@ -618,8 +640,8 @@ function extractSearchCriteria(userInput, previousCriteria = null) {
     debugLog("Extracted search criteria:", criteria);
     return criteria;
 }
-
-  // Enhanced search criteria extraction using Gemini and traditional methods
+     
+ // Enhanced search criteria extraction using Gemini and traditional methods
 async function enhancedExtractSearchCriteria(userInput, previousCriteria = null) {
     debugLog("Performing enhanced extraction for:", userInput);
     
@@ -638,46 +660,43 @@ async function enhancedExtractSearchCriteria(userInput, previousCriteria = null)
     
     debugLog("Successfully received implied features from Gemini:", impliedFeatures);
     
-    // Start with previous criteria if available
-    let enhancedCriteria = {...previousCriteria} || {};
+    // Start with previous criteria if available, but don't include previous impliedFeatures
+    let enhancedCriteria = {};
+    if (previousCriteria) {
+        const { impliedFeatures: oldImpliedFeatures, ...directCriteria } = previousCriteria;
+        enhancedCriteria = {...directCriteria};
+    }
     
-    // Apply implied features with priority logic
+    // Special handling for key phrases in the input
+    const lowerInput = userInput.toLowerCase();
+    const isAirportQuery = lowerInput.includes('airport') || lowerInput.includes('letiště');
+    const isCityCenter = lowerInput.includes('city center') || lowerInput.includes('centrum') || 
+                        lowerInput.includes('downtown') || lowerInput.includes('centre');
     
-    // 1. Handle property type
+    // Apply AI-detected property type
     if (impliedFeatures.propertyType) {
         enhancedCriteria.type = impliedFeatures.propertyType;
         debugLog(`Using AI-detected property type: ${impliedFeatures.propertyType}`);
     }
     
-    // 2. Handle location with priority logic
-    if (impliedFeatures.location) {
-        const aiLocation = impliedFeatures.location;
-        const traditionalLocation = traditionalCriteria.location;
-        
-        // IMPORTANT: If AI detected a specific Prague district, use it
-        if (aiLocation.match(/Prague \d+/i)) {
-            // AI detected a specific district
-            if (!traditionalLocation || traditionalLocation === "Prague") {
-                // Traditional extraction found no location or just "Prague"
-                enhancedCriteria.location = aiLocation;
-                debugLog(`Using AI-detected specific district: ${aiLocation} over general Prague`);
-            } else if (traditionalLocation.match(/Prague \d+/i)) {
-                // Both found specific districts, use traditional as it's explicitly mentioned
-                enhancedCriteria.location = traditionalLocation;
-                debugLog(`Using explicitly mentioned district: ${traditionalLocation}`);
-            } else {
-                // Traditional found a non-Prague location, use that for explicit priority
-                enhancedCriteria.location = traditionalLocation;
-                debugLog(`Using explicitly mentioned location: ${traditionalLocation}`);
-            }
-        } else {
-            // AI didn't detect a specific district, prefer traditional
-            enhancedCriteria.location = traditionalLocation || aiLocation;
-            debugLog(`Using location: ${enhancedCriteria.location}`);
-        }
+    // Special location priority logic
+    if (isAirportQuery) {
+        // For airport queries, always use Prague 6
+        enhancedCriteria.location = "Prague 6";
+        debugLog("Setting location to Prague 6 for airport query");
+    } 
+    else if (isCityCenter) {
+        // For city center queries, always use Prague 1
+        enhancedCriteria.location = "Prague 1";
+        debugLog("Setting location to Prague 1 for city center query");
+    }
+    else if (impliedFeatures.location) {
+        // For other cases, use AI-detected location
+        enhancedCriteria.location = impliedFeatures.location;
+        debugLog(`Using AI-detected location: ${impliedFeatures.location}`);
     }
     
-    // 3. Handle size
+    // Apply size information from AI
     if (impliedFeatures.size) {
         // Check if it's a range
         if (typeof impliedFeatures.size === 'string' && impliedFeatures.size.includes('-')) {
@@ -685,45 +704,75 @@ async function enhancedExtractSearchCriteria(userInput, previousCriteria = null)
             if (!isNaN(min) && !isNaN(max)) {
                 enhancedCriteria.minSize = min.toString();
                 enhancedCriteria.maxSize = max.toString();
+                delete enhancedCriteria.size; // Remove size if present
                 debugLog(`Using AI-detected size range: ${min}-${max} sqm`);
             }
         } else {
-            enhancedCriteria.size = impliedFeatures.size;
-            debugLog(`Using AI-detected size: ${impliedFeatures.size} sqm`);
+            // For the current query, use the AI-detected size
+            const size = parseInt(impliedFeatures.size);
+            if (!isNaN(size)) {
+                enhancedCriteria.size = size.toString();
+                delete enhancedCriteria.minSize; // Remove min/max if present
+                delete enhancedCriteria.maxSize;
+                debugLog(`Using AI-detected size: ${size} sqm`);
+            }
         }
     }
     
     // Store original AI response for explanation
     enhancedCriteria.impliedFeatures = impliedFeatures;
     
-    // Now apply explicit criteria from traditional extraction only for truly explicit values
-    // This ensures the AI's smarter interpretations aren't always overridden
-    
-    // For type, traditional should override only if it explicitly found a type
-    if (traditionalCriteria.type) {
+    // Only apply explicit criteria from traditional extraction if they're REALLY explicit
+    // and not carried over from previous conversation
+    if (traditionalCriteria.type && userInput.toLowerCase().includes(traditionalCriteria.type)) {
         enhancedCriteria.type = traditionalCriteria.type;
         debugLog(`Overriding with explicitly mentioned type: ${traditionalCriteria.type}`);
     }
     
-    // Size overrides are straightforward
-    if (traditionalCriteria.size) {
-        enhancedCriteria.size = traditionalCriteria.size;
-        debugLog(`Overriding with explicitly mentioned size: ${traditionalCriteria.size}`);
-    }
-    if (traditionalCriteria.minSize) {
-        enhancedCriteria.minSize = traditionalCriteria.minSize;
-        if (traditionalCriteria.maxSize) {
-            enhancedCriteria.maxSize = traditionalCriteria.maxSize;
-            debugLog(`Overriding with explicitly mentioned size range: ${traditionalCriteria.minSize}-${traditionalCriteria.maxSize}`);
-        } else {
-            debugLog(`Overriding with explicitly mentioned min size: ${traditionalCriteria.minSize}`);
+    // Only override location if the traditional extraction found a truly explicit mention
+    // of a location that conflicts with the AI's detection
+    if (traditionalCriteria.location) {
+        // For airport queries, always keep Prague 6 regardless of traditional extraction
+        if (isAirportQuery) {
+            enhancedCriteria.location = "Prague 6";
+            debugLog("Enforcing Prague 6 location for airport query");
         }
-    } else if (traditionalCriteria.maxSize) {
-        enhancedCriteria.maxSize = traditionalCriteria.maxSize;
-        debugLog(`Overriding with explicitly mentioned max size: ${traditionalCriteria.maxSize}`);
+        // For city center queries, always keep Prague 1
+        else if (isCityCenter) {
+            enhancedCriteria.location = "Prague 1";
+            debugLog("Enforcing Prague 1 location for city center query");
+        }
+        // For explicit district numbers in the query, use that
+        else if (userInput.match(/prague\s*\d+|praha\s*\d+/i)) {
+            enhancedCriteria.location = traditionalCriteria.location;
+            debugLog(`Using explicitly mentioned district: ${traditionalCriteria.location}`);
+        }
     }
     
-    // Availability is straightforward
+    // Handle size from traditional extraction
+    const hasSizeInQuery = userInput.match(/\d+\s*(?:sq\s*m|sqm|square meter|m2|metr|size)/i) || 
+                          userInput.match(/(?:about|around|approximately|přibližně|kolem)\s+(\d+)/i);
+    
+    if (hasSizeInQuery) {
+        if (traditionalCriteria.size) {
+            enhancedCriteria.size = traditionalCriteria.size;
+            delete enhancedCriteria.minSize; // Remove min/max if present
+            delete enhancedCriteria.maxSize;
+            debugLog(`Using explicitly mentioned size: ${traditionalCriteria.size} sqm`);
+        } else if (traditionalCriteria.minSize || traditionalCriteria.maxSize) {
+            if (traditionalCriteria.minSize) {
+                enhancedCriteria.minSize = traditionalCriteria.minSize;
+                debugLog(`Using explicitly mentioned min size: ${traditionalCriteria.minSize} sqm`);
+            }
+            if (traditionalCriteria.maxSize) {
+                enhancedCriteria.maxSize = traditionalCriteria.maxSize;
+                debugLog(`Using explicitly mentioned max size: ${traditionalCriteria.maxSize} sqm`);
+            }
+            delete enhancedCriteria.size; // Remove size if present
+        }
+    }
+    
+    // Availability from traditional extraction
     if (traditionalCriteria.available) {
         enhancedCriteria.available = traditionalCriteria.available;
         debugLog(`Using explicitly mentioned availability: ${traditionalCriteria.available}`);
@@ -1420,13 +1469,15 @@ async function extractImpliedFeaturesWithGemini(userQuery) {
     debugLog("Extracting implied features from query:", userQuery);
     
     try {
-        // Create a simpler, more focused prompt
-        const featureExtractionPrompt = `You are a Prague real estate expert. Analyze this property search query: "${userQuery}"
+        // Create a simpler, more focused prompt with EXPLICIT examples for airport and city center
+        const featureExtractionPrompt = `You are a Prague real estate expert assistant. Analyze this property search query and extract the key details:
 
-Return a simple JSON with these fields:
-- propertyType: what type of property they want (office, retail, industrial)
-- location: specific Prague district number (just write "Prague X" where X is district number)
-- size: the size in sqm they're looking for (exact number or range like "100-150")
+"${userQuery}"
+
+For location understanding:
+- If they mention "airport", "near airport", or "airport area" → set location to "Prague 6"
+- If they mention "city center", "downtown", or "centrum" → set location to "Prague 1" 
+- For other locations, identify the specific Prague district number if possible
 
 HELPFUL CONTEXT ABOUT PRAGUE REAL ESTATE:
 - Prague 1 and 2 are considered the "city center" or "downtown"
@@ -1437,10 +1488,19 @@ HELPFUL CONTEXT ABOUT PRAGUE REAL ESTATE:
 - Office sizes in Prague typically range from 100-5000 sqm
 - Retail spaces typically range from 50-2000 sqm
 
-Example response format:
-{"propertyType":"office","location":"Prague 6","size":"100-150"}
+Return a simple JSON with these fields:
+- propertyType: what type of property (office, retail, industrial) - default to "office" if unclear
+- location: specific Prague district preferred (e.g., "Prague 6")
+- size: the size in sqm they're looking for
 
-IMPORTANT: Return ONLY the JSON. No explanations, no markdown, no code blocks.`;
+Example responses:
+Query: "I need an office in the city center"
+{"propertyType":"office","location":"Prague 1","size":null}
+
+Query: "retail space near the airport around 150 sqm"
+{"propertyType":"retail","location":"Prague 6","size":"150"}
+
+IMPORTANT: Return ONLY the JSON. No extra text, no markdown.`;
 
         // Call the Gemini API with a timeout
         const controller = new AbortController();
@@ -1519,27 +1579,39 @@ IMPORTANT: Return ONLY the JSON. No explanations, no markdown, no code blocks.`;
         // Basic fallback for common terms if AI extraction fails
         if (/\bairport\b|\bletiště\b/i.test(userQuery)) {
             fallbackFeatures.location = "Prague 6";
+            debugLog("Fallback: Detected airport reference, setting location to Prague 6");
         } else if (/\bcity center\b|\bcentrum\b|\bdowntown\b/i.test(userQuery)) {
             fallbackFeatures.location = "Prague 1";
+            debugLog("Fallback: Detected city center reference, setting location to Prague 1");
         }
         
         // Size extraction fallback
-        const sizeMatch = userQuery.match(/\b(\d+)(?:\s*-\s*(\d+))?\s*(?:sqm|m2|m²)\b/i);
+        const sizeMatch = userQuery.match(/\b(\d+)(?:\s*-\s*(\d+))?\s*(?:sqm|m2|m²)\b/i) ||
+                         userQuery.match(/(?:about|around|approximately|přibližně|kolem)\s+(\d+)/i);
+        
         if (sizeMatch) {
             if (sizeMatch[2]) {
                 fallbackFeatures.size = `${sizeMatch[1]}-${sizeMatch[2]}`;
             } else {
                 fallbackFeatures.size = sizeMatch[1];
             }
+            debugLog(`Fallback: Detected size: ${fallbackFeatures.size}`);
         }
         
         // Type extraction fallback
         if (/\boffice\b|\bkancelář\b/i.test(userQuery)) {
             fallbackFeatures.propertyType = "office";
+            debugLog("Fallback: Detected office type");
         } else if (/\bretail\b|\bobchod\b/i.test(userQuery)) {
             fallbackFeatures.propertyType = "retail";
+            debugLog("Fallback: Detected retail type");
         } else if (/\bindustrial\b|\bsklad\b|\bprůmysl\b/i.test(userQuery)) {
             fallbackFeatures.propertyType = "industrial";
+            debugLog("Fallback: Detected industrial type");
+        } else {
+            // Default to office if no type mentioned
+            fallbackFeatures.propertyType = "office";
+            debugLog("Fallback: Using default office type");
         }
         
         // If we found any fallback features, return them
