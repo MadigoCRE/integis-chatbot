@@ -328,6 +328,7 @@
     <!-- Debug panel (for development) -->
     <div id="debug-panel" class="debug-panel"></div>
  <script>
+         const originalHandleDistrictSelection = window.handleDistrictSelection;
         // Debug flag - set to true to show debug panel and logs
         const DEBUG_MODE = true;
         
@@ -4557,6 +4558,43 @@ window.handleConversationalQueryWithGemini = handleConversationalQueryWithGemini
 window.isConversationalQuery = isConversationalQuery;
 window.handleDistrictSelection = handleDistrictSelection;
 window.handleShowAllInLocation = handleShowAllInLocation;
+
+// This "wraps" the function to ensure it preserves size information
+window.handleDistrictSelection = function(district, propertyType) {
+    console.log("INTERCEPTED handleDistrictSelection call", district, propertyType);
+    console.trace(); // Show the call stack
+    
+    // Get current size information
+    const currentCriteria = conversationState.currentSearchCriteria || {};
+    const sizeInfo = {
+        size: currentCriteria.size,
+        minSize: currentCriteria.minSize,
+        maxSize: currentCriteria.maxSize
+    };
+    
+    console.log("SIZE INFO BEFORE:", sizeInfo);
+    
+    // Call the original function
+    originalHandleDistrictSelection(district, propertyType);
+    
+    // Now ensure size information is preserved in the updated criteria
+    const updatedCriteria = conversationState.currentSearchCriteria;
+    console.log("CRITERIA AFTER:", updatedCriteria);
+    
+    // If size info was lost, add it back
+    if ((sizeInfo.size || sizeInfo.minSize || sizeInfo.maxSize) && 
+        !(updatedCriteria.size || updatedCriteria.minSize || updatedCriteria.maxSize)) {
+        
+        console.log("SIZE INFO WAS LOST! Adding it back...");
+        
+        // Add size information back
+        if (sizeInfo.size) updatedCriteria.size = sizeInfo.size;
+        if (sizeInfo.minSize) updatedCriteria.minSize = sizeInfo.minSize;
+        if (sizeInfo.maxSize) updatedCriteria.maxSize = sizeInfo.maxSize;
+        
+        console.log("FINAL CRITERIA:", updatedCriteria);
+    }
+};
 </script>
 </body>
 </html>  
