@@ -2268,24 +2268,23 @@ if (isConversationalQuery(inputText)) {
 function handleDistrictSelection(district, propertyType) {
     debugLog(`District selected: ${district}, Property type: ${propertyType}`);
     
+    // Get the current criteria (important to get this BEFORE adding the user message)
+    const currentCriteria = conversationState.currentSearchCriteria || {};
+    
     // Create a user message showing the selection
     const userMessage = `${propertyType} in ${district}`;
     addMessage(userMessage, 'user');
     conversationHistory.push({role: "user", content: userMessage});
     
-    // Get current criteria to preserve size information if available
-    const currentCriteria = conversationState.currentSearchCriteria || {};
+    // Create new criteria object, PRESERVING ALL EXISTING CRITERIA
+    const criteria = {...currentCriteria}; // Copy all existing criteria
     
-    // Create new criteria, preserving size information from the original query
-    const criteria = {
-        location: district,
-        type: propertyType
-    };
+    // Update only the location and type
+    criteria.location = district;
+    criteria.type = propertyType;
     
-    // Important: Check and preserve size-related fields from the original query
-    if (currentCriteria.size) criteria.size = currentCriteria.size;
-    if (currentCriteria.minSize) criteria.minSize = currentCriteria.minSize;
-    if (currentCriteria.maxSize) criteria.maxSize = currentCriteria.maxSize;
+    // Log the criteria to verify size is preserved
+    debugLog("Using criteria for district selection:", criteria);
     
     // Reset pagination offset
     conversationState.offset = 0;
@@ -2334,6 +2333,7 @@ function handleDistrictSelection(district, propertyType) {
             
             // Display the message with buttons
             addMessage(noSizeMatchMessage + "<br><br>" + buttons, 'bot');
+            conversationHistory.push({role: "assistant", content: noSizeMatchMessage});
             return;
         }
         
@@ -2341,17 +2341,23 @@ function handleDistrictSelection(district, propertyType) {
         displayEnhancedSearchResults(matchedProperties, criteria, null, userMessage);
     }, 500);
 }
-
+// New helper function to handle showing all properties in a location (clearing size constraints)
 // New helper function to handle showing all properties in a location (clearing size constraints)
 function handleShowAllInLocation(district, propertyType) {
-    // Create a new criteria object with just location and type
-    const criteria = {
-        location: district,
-        type: propertyType
-    };
+    // Get current criteria (to preserve other filters that might be useful)
+    const currentCriteria = {...conversationState.currentSearchCriteria} || {};
+    
+    // Remove size constraints but keep other criteria
+    delete currentCriteria.size;
+    delete currentCriteria.minSize;
+    delete currentCriteria.maxSize;
+    
+    // Ensure location and type are set
+    currentCriteria.location = district;
+    currentCriteria.type = propertyType;
     
     // Update conversation state
-    conversationState.currentSearchCriteria = criteria;
+    conversationState.currentSearchCriteria = currentCriteria;
     conversationState.offset = 0;
     
     // Add user message
@@ -2377,10 +2383,10 @@ function handleShowAllInLocation(district, propertyType) {
         }
         
         // Search for matching properties
-        const matchedProperties = enhancedSearchProperties(criteria);
+        const matchedProperties = enhancedSearchProperties(currentCriteria);
         
         // Display the results
-        displayEnhancedSearchResults(matchedProperties, criteria, null, userMessage);
+        displayEnhancedSearchResults(matchedProperties, currentCriteria, null, userMessage);
     }, 500);
 }
      
