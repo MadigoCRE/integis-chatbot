@@ -2268,29 +2268,48 @@ if (isConversationalQuery(inputText)) {
 function handleDistrictSelection(district, propertyType) {
     debugLog(`District selected: ${district}, Property type: ${propertyType}`);
     
-    // Get the current criteria (important to get this BEFORE adding the user message)
-    const currentCriteria = conversationState.currentSearchCriteria || {};
+    // First, get the current search criteria object
+    const currentSearchCriteria = {...conversationState.currentSearchCriteria};
+    debugLog("Current search criteria BEFORE modification:", JSON.stringify(currentSearchCriteria));
     
     // Create a user message showing the selection
     const userMessage = `${propertyType} in ${district}`;
     addMessage(userMessage, 'user');
     conversationHistory.push({role: "user", content: userMessage});
     
-    // Create new criteria object, PRESERVING ALL EXISTING CRITERIA
-    const criteria = {...currentCriteria}; // Copy all existing criteria
+    // Extract size information from current criteria
+    const sizeInfo = {
+        size: currentSearchCriteria.size,
+        minSize: currentSearchCriteria.minSize,
+        maxSize: currentSearchCriteria.maxSize
+    };
     
-    // Update only the location and type
-    criteria.location = district;
-    criteria.type = propertyType;
+    // Update location and type
+    currentSearchCriteria.location = district;
+    currentSearchCriteria.type = propertyType;
     
-    // Log the criteria to verify size is preserved
-    debugLog("Using criteria for district selection:", criteria);
+    // Double check that size information is present
+    if (sizeInfo.size) {
+        currentSearchCriteria.size = sizeInfo.size;
+        debugLog(`Explicitly preserving size: ${sizeInfo.size} sqm`);
+    }
+    if (sizeInfo.minSize) {
+        currentSearchCriteria.minSize = sizeInfo.minSize;
+        debugLog(`Explicitly preserving minSize: ${sizeInfo.minSize} sqm`);
+    }
+    if (sizeInfo.maxSize) {
+        currentSearchCriteria.maxSize = sizeInfo.maxSize;
+        debugLog(`Explicitly preserving maxSize: ${sizeInfo.maxSize} sqm`);
+    }
+    
+    // Log the modified criteria
+    debugLog("Current search criteria AFTER modification:", JSON.stringify(currentSearchCriteria));
     
     // Reset pagination offset
     conversationState.offset = 0;
     
-    // Update conversation state
-    conversationState.currentSearchCriteria = criteria;
+    // Update conversation state with the modified criteria
+    conversationState.currentSearchCriteria = currentSearchCriteria;
     
     // Show typing indicator
     const typingIndicator = document.createElement('div');
@@ -2305,14 +2324,20 @@ function handleDistrictSelection(district, propertyType) {
             document.getElementById('typing-indicator').remove();
         }
         
-        // Search for matching properties
-        const matchedProperties = enhancedSearchProperties(criteria);
+        // Get the current criteria again to be 100% sure we have the right data
+        const finalCriteria = {...conversationState.currentSearchCriteria};
+        debugLog("Final search criteria before search:", JSON.stringify(finalCriteria));
         
-        // If we have size criteria but no matches, we should offer to show properties without size constraint
-        if (matchedProperties.length === 0 && (criteria.size || criteria.minSize || criteria.maxSize)) {
-            const sizeMessage = criteria.size ? 
-                `around ${criteria.size} sqm` : 
-                `between ${criteria.minSize} and ${criteria.maxSize} sqm`;
+        // Search for matching properties with the correct criteria
+        const matchedProperties = enhancedSearchProperties(finalCriteria);
+        
+        // If we have size criteria but no matches, offer to show properties without size constraint
+        if (matchedProperties.length === 0 && 
+            (finalCriteria.size || finalCriteria.minSize || finalCriteria.maxSize)) {
+            
+            const sizeMessage = finalCriteria.size ? 
+                `around ${finalCriteria.size} sqm` : 
+                `between ${finalCriteria.minSize} and ${finalCriteria.maxSize} sqm`;
                 
             const isCzechQuery = isCzech(userMessage);
             
@@ -2338,10 +2363,10 @@ function handleDistrictSelection(district, propertyType) {
         }
         
         // Display the results normally if we have matches
-        displayEnhancedSearchResults(matchedProperties, criteria, null, userMessage);
+        displayEnhancedSearchResults(matchedProperties, finalCriteria, null, userMessage);
     }, 500);
 }
-// New helper function to handle showing all properties in a location (clearing size constraints)
+     
 // New helper function to handle showing all properties in a location (clearing size constraints)
 function handleShowAllInLocation(district, propertyType) {
     // Get current criteria (to preserve other filters that might be useful)
