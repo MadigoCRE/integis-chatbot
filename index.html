@@ -517,6 +517,25 @@
             
             return false;
         }
+
+    // Function to detect if this is a conversational query rather than a direct search
+function isConversationalQuery(userInput) {
+    const lowercaseInput = userInput.toLowerCase();
+    
+    // Patterns that indicate a conversational query rather than a direct search
+    return (
+        // Questions
+        /^(what|which|where|how|why|who|can|could|would|should)\b/i.test(lowercaseInput) ||
+        
+        // Asking for recommendations or opinions
+        /(recommend|suggest|opinion|advice|best|better|good|great|nice|cool|trendy|hipster|funky)/i.test(lowercaseInput) ||
+        
+        // Longer queries are more likely to be conversational
+        (lowercaseInput.split(/\s+/).length > 8 && 
+         /(area|location|district|neighborhood|part|place)/i.test(lowercaseInput))
+    );
+}
+     
      // Extract search criteria from user input
 function extractSearchCriteria(userInput, previousCriteria = null) {
     debugLog("Extracting search criteria from:", userInput);
@@ -1624,6 +1643,119 @@ IMPORTANT: Return ONLY the JSON. No extra text, no markdown.`;
         return null;
     }
 }
+
+// Function to handle conversational queries using Gemini
+async function handleConversationalQueryWithGemini(userQuery) {
+    debugLog("Handling conversational query with Gemini:", userQuery);
+    
+    try {
+        // Create a prompt that guides Gemini to be a Prague real estate expert
+        const conversationalPrompt = `You are a Prague real estate expert working for Integis. Help the client with their location question:
+
+"${userQuery}"
+
+CONTEXT ABOUT PRAGUE:
+- Prague is divided into districts numbered 1-10
+- Prague 1: Historic center, prestigious, more expensive business district
+- Prague 2: Vinohrady area, upscale residential and some office area
+- Prague 3: Žižkov, bohemian and hipster area with cultural venues, fewer office locations
+- Prague 4: Pankrác, Brumlovka, modern business district with many corporate offices
+- Prague 5: Smíchov, mixed business and residential area
+- Prague 6: Near the airport, diplomatic quarter
+- Prague 7: Holešovice and Letná, trendy, artistic district with many creative spaces
+- Prague 8: Karlín, Libeň, modernized area with tech startups
+- Prague 9: Vysočany, developing business area
+- Prague 10: Vršovice, Strašnice, up-and-coming area with some hipster spots
+
+YOUR TASK:
+1. Provide helpful information about Prague districts that match their requirements
+2. Focus on giving them location advice, not specific properties
+3. Recommend 2-4 specific districts that would be best for them
+4. Be conversational and friendly
+5. Keep your response under 1500 characters
+6. Be knowledgeable about Prague's neighborhoods and their characteristics
+7. For "hipster" or "trendy" areas, recommend Prague 7 and Prague 3
+8. For business-focused areas, recommend Prague 4 and Prague 5
+9. For prestigious locations, recommend Prague 1 and Prague 2
+10. For airport proximity, recommend Prague 6
+
+INCLUDE THIS EXACT TEXT AT THE END:
+"[DISTRICT_RECOMMENDATIONS:X,Y,Z]" where X,Y,Z are the district numbers (1-10) you most recommend for their query.
+
+Remember you're an expert on Prague real estate, so provide valuable insights, but don't recommend specific properties yet - just help them choose the right area.`;
+
+        // Call the Gemini API with a timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+        
+        const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                contents: [
+                    {
+                        role: "user",
+                        parts: [{ text: conversationalPrompt }]
+                    }
+                ],
+                generationConfig: {
+                    temperature: 0.7,  // Higher temperature for more creative, conversational responses
+                    maxOutputTokens: 1000
+                }
+            })
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        // Extract the generated text
+        if (result.candidates && result.candidates.length > 0 && 
+            result.candidates[0].content && result.candidates[0].content.parts && 
+            result.candidates[0].content.parts.length > 0) {
+            
+            const generatedText = result.candidates[0].content.parts[0].text.trim();
+            debugLog("Received conversational response from Gemini (first 100 chars):", generatedText.substring(0, 100) + "...");
+            
+            // Extract district recommendations if present
+            const recommendationsMatch = generatedText.match(/\[DISTRICT_RECOMMENDATIONS:([^\]]+)\]/);
+            let recommendedDistricts = [];
+            
+            if (recommendationsMatch && recommendationsMatch[1]) {
+                const districtNums = recommendationsMatch[1].split(',').map(d => d.trim());
+                recommendedDistricts = districtNums.map(num => `Prague ${num}`);
+                debugLog("Extracted district recommendations:", recommendedDistricts);
+                
+                // Remove the recommendations tag from the displayed text
+                const cleanedText = generatedText.replace(/\[DISTRICT_RECOMMENDATIONS:[^\]]+\]/, '').trim();
+                
+                // Return both the text and recommendations
+                return {
+                    text: cleanedText,
+                    recommendedDistricts: recommendedDistricts
+                };
+            }
+            
+            // If no recommendations tag found, return just the text
+            return {
+                text: generatedText,
+                recommendedDistricts: []
+            };
+        }
+        
+        throw new Error("No valid response from Gemini");
+    } catch (error) {
+        debugLog("Error in conversational query handling:", error.message);
+        throw error;
+    }
+}
      
  // Call the Gemini API
 async function callGeminiAPI(userInput) {
@@ -1778,34 +1910,24 @@ ${propertiesText}`;
     }
 }
 
-// Improved sendMessage function with enhanced feature extraction
-async function sendMessage() {
-    const userInput = document.getElementById('user-input');
-    const inputText = userInput.value.trim();
+// Function to handle district selection from the conversational interface
+function handleDistrictSelection(district, propertyType) {
+    debugLog(`District selected: ${district}, Property type: ${propertyType}`);
     
-    // First check for command - this should be the first thing we do
-    if (inputText.toLowerCase() === "!test api") {
-        userInput.value = '';
-        testGeminiAPI();
-        return;
-    }
+    // Create a user message showing the selection
+    const userMessage = `${propertyType} in ${district}`;
+    addMessage(userMessage, 'user');
+    conversationHistory.push({role: "user", content: userMessage});
     
-    if (!inputText) return;
+    // Update search criteria
+    const criteria = {
+        location: district,
+        type: propertyType
+    };
     
-    debugLog("User input:", inputText);
-    
-    // Save to conversation state before clearing
-    conversationState.lastQuery = inputText;
-    
-    // Add user message
-    addMessage(inputText, 'user');
-    
-    // Add to conversation history
-    conversationHistory.push({role: "user", content: inputText});
-    debugLog("Updated conversation history:", conversationHistory.length + " messages");
-    
-    // Clear input
-    userInput.value = '';
+    // Update conversation state
+    conversationState.currentSearchCriteria = criteria;
+    conversationState.offset = 0;
     
     // Show typing indicator
     const typingIndicator = document.createElement('div');
@@ -1813,172 +1935,19 @@ async function sendMessage() {
     typingIndicator.textContent = 'Typing...';
     typingIndicator.id = 'typing-indicator';
     document.getElementById('messages').appendChild(typingIndicator);
-    document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
     
-    // Ensure properties are loaded
-    if (!propertiesLoaded) {
-        debugLog("Properties not loaded, loading now...");
-        await loadProperties();
-    }
-
-    // Check if this is a follow-up question
-    const isFollowUp = isFollowUpQuestion(inputText);
-    debugLog("Is follow-up question:", isFollowUp);
-    
-    // Create search criteria with enhanced extraction
-    let criteria = {};
-    
-    // If follow-up, start with previous criteria
-    if (isFollowUp && conversationState.currentSearchCriteria) {
-        criteria = {...conversationState.currentSearchCriteria};
-        debugLog("Using previous search criteria as base:", criteria);
-        
-        // For pagination requests, keep the same criteria but update offset
-        if (/more|další|show more|ukázat více/i.test(inputText)) {
-            conversationState.offset += 5; // Show next 5 results
-            debugLog("Pagination request - updating offset to:", conversationState.offset);
-        }
-    } else {
-        // Reset offset for new searches
-        conversationState.offset = 0;
-    }
-    
-    // Use enhanced extraction for new criteria
-    const newCriteria = await enhancedExtractSearchCriteria(inputText, isFollowUp ? criteria : null);
-    
-    // Merge with existing criteria, with new values taking precedence
-    criteria = {...criteria, ...newCriteria};
-    
-    // For requests to "show all" - start fresh with just the core criteria
-    if (/show all|share all|all properties|all units|všechny|všechny jednotky/i.test(inputText)) {
-        // Keep only the most important criteria (type, location, size) and reset pagination
-        const coreCriteria = {};
-        if (criteria.type) coreCriteria.type = criteria.type;
-        if (criteria.location) coreCriteria.location = criteria.location;
-        if (criteria.size) coreCriteria.size = criteria.size;
-        if (criteria.maxSize) coreCriteria.maxSize = criteria.maxSize;
-        if (criteria.minSize) coreCriteria.minSize = criteria.minSize;
-        
-        criteria = coreCriteria;
-        conversationState.offset = 0;
-        debugLog("'Show all' request - using core criteria only:", criteria);
-    }
-    
-    // IMPORTANT: Update the global conversation state with the new criteria
-    conversationState.currentSearchCriteria = {...criteria};
-    debugLog("Updated conversation state with new criteria:", conversationState.currentSearchCriteria);
-    
-    // Extract the implied features for explanation if present
-    const impliedFeatures = criteria.impliedFeatures;
-    // Remove from search criteria to avoid interfering with property matching
-    delete criteria.impliedFeatures;
-    
-    // If this is a people-based query, use Gemini to convert people to sqm
-    if (criteria.peopleCount) {
-        try {
-            debugLog("People-based query detected, using Gemini to convert to sqm");
-            
-            // Call Gemini API to convert people to sqm
-            const conversionResponse = await callGeminiAPIForPeopleConversion(criteria.peopleCount, criteria.type || "office");
-            
-            // Update criteria with the sqm conversion
-            if (conversionResponse.minSize && conversionResponse.maxSize) {
-                debugLog(`Converted ${criteria.peopleCount} people to ${conversionResponse.minSize}-${conversionResponse.maxSize} sqm`);
-                
-                // Update criteria with the size range
-                delete criteria.size; // Remove any size if present
-                criteria.minSize = conversionResponse.minSize;
-                criteria.maxSize = conversionResponse.maxSize;
-                
-                // Remove the peopleCount flag
-                delete criteria.peopleCount;
-                
-                // Update conversation state
-                conversationState.currentSearchCriteria = {...criteria};
-                
-                // Search with the updated criteria
-                const matchedProperties = enhancedSearchProperties(criteria);
-                
-                if (matchedProperties.length > 0) {
-                    // Use the enhanced display function for consistency
-                    displayEnhancedSearchResults(matchedProperties, criteria, impliedFeatures, inputText);
-                    return;
-                } else {
-                    // No matching properties found
-                    const noMatchResponse = isCzech(inputText)
-                        ? `Pro ${criteria.peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Bohužel jsem nenašel žádné nemovitosti, které přesně odpovídají těmto parametrům. Zkuste prosím upravit kritéria vyhledávání nebo se podívat na alternativy.`
-                        : `For ${criteria.peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Unfortunately, I couldn't find any properties that exactly match these parameters. Please try adjusting your search criteria or looking at alternatives.`;
-                    
-                    if (document.getElementById('typing-indicator')) {
-                        document.getElementById('typing-indicator').remove();
-                    }
-                    
-                    addMessage(noMatchResponse, 'bot');
-                    conversationHistory.push({role: "assistant", content: noMatchResponse});
-                    return;
-                }
-            }
-        } catch (error) {
-            debugLog("Error processing people-based query:", error.message);
-            // Continue with normal flow if there's an error
-        }
-    }
-
-    // Search for properties using the enhanced criteria
-    const matchedProperties = enhancedSearchProperties(criteria);
-    
-    // Store the properties we've shown for follow-up questions
-    if (matchedProperties.length > 0) {
-        const propertiesToShow = matchedProperties.slice(
-            conversationState.offset, 
-            conversationState.offset + 5
-        );
-        
-        // Update last shown properties
-        conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
-        debugLog("Updated last shown properties:", conversationState.lastShownProperties);
-        
-        // Use the enhanced display function
-        displayEnhancedSearchResults(matchedProperties, criteria, impliedFeatures, inputText);
-        return;
-    }
-    
-    // If we didn't find any properties with the enhanced criteria, try Gemini API for a more conversational response
-    try {
-        debugLog("No matches found with enhanced criteria, using Gemini API for conversational response");
-        // Try to call Gemini API with timeout
-        const apiPromise = callGeminiAPI(inputText);
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => {
-                debugLog("API call timed out after 20 seconds");
-                reject(new Error("API call timed out"))
-            }, 20000)
-        );
-        
-        const aiResponse = await Promise.race([apiPromise, timeoutPromise]);
-        debugLog("Received API response");
-        
+    // Short timeout to show the typing indicator
+    setTimeout(() => {
         if (document.getElementById('typing-indicator')) {
             document.getElementById('typing-indicator').remove();
         }
         
-        // Save this response to conversation state
-        conversationState.lastResponse = aiResponse;
+        // Search for matching properties
+        const matchedProperties = enhancedSearchProperties(criteria);
         
-        addMessage(aiResponse, 'bot');
-        
-        // Add to conversation history
-        conversationHistory.push({role: "assistant", content: aiResponse});
-    } catch (error) {
-        // If Gemini API fails, show a simple "no properties found" message using the enhanced display
-        debugLog("Error calling AI, displaying simple no matches response:", error.message);
-        if (document.getElementById('typing-indicator')) {
-            document.getElementById('typing-indicator').remove();
-        }
-        
-        // Display no results with enhanced features explanation
-        displayEnhancedSearchResults([], criteria, impliedFeatures, inputText);
-    }
+        // Display the results
+        displayEnhancedSearchResults(matchedProperties, criteria, null, userMessage);
+    }, 500);
 }
      
 // Function to add a message to the chat
@@ -2106,6 +2075,126 @@ function testGeminiAPI() {
     });
 }
 
+// Function to handle district selection from the conversational interface
+async function handleDistrictSelection(district, propertyType) {
+    debugLog(`User selected district: ${district}, property type: ${propertyType}`);
+    
+    // Add the user's selection to the chat as if they had typed it
+    const isCzechQuery = isCzech(document.getElementById('user-input').value);
+    const selectionMessage = isCzechQuery
+        ? `Ukaž mi ${propertyType} prostory v lokalitě ${district}`
+        : `Show me ${propertyType} spaces in ${district}`;
+    
+    addMessage(selectionMessage, 'user');
+    conversationHistory.push({role: "user", content: selectionMessage});
+    
+    // Show typing indicator
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing-indicator';
+    typingIndicator.textContent = 'Typing...';
+    typingIndicator.id = 'typing-indicator';
+    document.getElementById('messages').appendChild(typingIndicator);
+    
+    // Create search criteria
+    const criteria = {
+        type: propertyType,
+        location: district
+    };
+    
+    // Store the criteria in conversation state
+    conversationState.currentSearchCriteria = criteria;
+    
+    // Search for properties
+    const matchedProperties = enhancedSearchProperties(criteria);
+    
+    // Remove typing indicator
+    if (document.getElementById('typing-indicator')) {
+        document.getElementById('typing-indicator').remove();
+    }
+    
+    if (matchedProperties.length > 0) {
+        // Generate response
+        let response = "";
+        
+        if (district === "Prague") {
+            response = isCzechQuery
+                ? `Našel jsem ${matchedProperties.length} ${propertyType} prostorů v celé Praze:<br><br>`
+                : `I found ${matchedProperties.length} ${propertyType} spaces across Prague:<br><br>`;
+        } else {
+            response = isCzechQuery
+                ? `Našel jsem ${matchedProperties.length} ${propertyType} prostorů v lokalitě ${district}:<br><br>`
+                : `I found ${matchedProperties.length} ${propertyType} spaces in ${district}:<br><br>`;
+        }
+        
+        // Add property listings
+        response += generatePropertyListingHTML(matchedProperties, 0, 5);
+        
+        // Add pagination if needed
+        if (matchedProperties.length > 5) {
+            response += isCzechQuery
+                ? `<br>Zobrazuji 1-5 z ${matchedProperties.length} nalezených nemovitostí.<br>`
+                : `<br>Showing 1-5 of ${matchedProperties.length} matching properties.<br>`;
+            
+            // Add "Show More" button
+            response += `<div class="action-button-container">
+                <button class="action-button" onclick="handleShowMore()">${isCzechQuery ? 'Zobrazit další' : 'Show More'}</button>
+            </div>`;
+        } else {
+            response += isCzechQuery
+                ? `<br>Zobrazuji ${matchedProperties.length} z ${matchedProperties.length} nalezených nemovitostí.`
+                : `<br>Showing ${matchedProperties.length} of ${matchedProperties.length} matching properties.`;
+        }
+        
+        // Update last shown properties
+        conversationState.lastShownProperties = matchedProperties.slice(0, 5).map(p => p.name);
+        
+        // Add refinement buttons
+        response += generateRefinementButtonsHTML(criteria, isCzechQuery);
+        
+        // Display the response
+        addMessage(response, 'bot');
+        conversationHistory.push({role: "assistant", content: response});
+    } else {
+        // No properties found
+        let noMatchResponse = isCzechQuery
+            ? `Bohužel jsem nenašel žádné ${propertyType} prostory v lokalitě ${district}. Chcete zkusit jinou oblast?`
+            : `I couldn't find any ${propertyType} spaces in ${district}. Would you like to try a different area?`;
+        
+        // Add buttons for other recommended districts
+        if (conversationState.currentSearchCriteria && 
+            conversationState.currentSearchCriteria.recommendedDistricts) {
+            
+            const otherDistricts = conversationState.currentSearchCriteria.recommendedDistricts
+                .filter(d => d !== district);
+            
+            if (otherDistricts.length > 0) {
+                noMatchResponse += isCzechQuery
+                    ? `<br><br>Zkuste jednu z těchto oblastí:`
+                    : `<br><br>Try one of these areas:`;
+                
+                noMatchResponse += `<div class="suggestion-buttons">`;
+                
+                for (const otherDistrict of otherDistricts) {
+                    noMatchResponse += `<button class="suggestion-button" onclick="handleDistrictSelection('${otherDistrict}', '${propertyType}')">
+                        ${otherDistrict}
+                    </button>`;
+                }
+                
+                // Also offer "All Prague" option
+                noMatchResponse += `<button class="suggestion-button" onclick="handleDistrictSelection('Prague', '${propertyType}')">
+                    ${isCzechQuery ? 'Celá Praha' : 'All Prague'}
+                </button>`;
+                
+                noMatchResponse += `</div>`;
+            }
+        }
+        
+        // Display the no-results message
+        addMessage(noMatchResponse, 'bot');
+        conversationHistory.push({role: "assistant", content: noMatchResponse});
+    }
+}     
+     
 // Function to handle button clicks
 function handleSuggestionClick(suggestion) {
     // Add the suggestion text to the input field
@@ -3887,6 +3976,9 @@ window.handleClearLocationFilter = handleClearLocationFilter;
 window.extractImpliedFeaturesWithGemini = extractImpliedFeaturesWithGemini;
 window.enhancedExtractSearchCriteria = enhancedExtractSearchCriteria;
 window.displayEnhancedSearchResults = displayEnhancedSearchResults;
+window.handleConversationalQueryWithGemini = handleConversationalQueryWithGemini;
+window.isConversationalQuery = isConversationalQuery;
+window.handleDistrictSelection = handleDistrictSelection;
 </script>
 </body>
 </html>  
