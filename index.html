@@ -331,7 +331,7 @@
          const originalHandleDistrictSelection = window.handleDistrictSelection;
         // Debug flag - set to true to show debug panel and logs
         const DEBUG_MODE = true;
-        
+        let globalSizeInfo = null;
         // Initialize properties array
         let properties = [];
         let propertiesLoaded = false;
@@ -848,6 +848,25 @@ async function enhancedExtractSearchCriteria(userInput, previousCriteria = null)
 // Enhanced search function with proper Prague district handling
 function enhancedSearchProperties(criteria) {
     // NEW CODE START - Ensure size information is preserved
+    // First check if we have global size info
+    if (globalSizeInfo) {
+        debugLog("Found global size info:", JSON.stringify(globalSizeInfo));
+        
+        // Apply global size info if missing in criteria
+        if (globalSizeInfo.size && !criteria.size) {
+            debugLog("RESTORING missing size info from global: size=" + globalSizeInfo.size);
+            criteria.size = globalSizeInfo.size;
+        }
+        if (globalSizeInfo.minSize && !criteria.minSize) {
+            debugLog("RESTORING missing size info from global: minSize=" + globalSizeInfo.minSize);
+            criteria.minSize = globalSizeInfo.minSize;
+        }
+        if (globalSizeInfo.maxSize && !criteria.maxSize) {
+            debugLog("RESTORING missing size info from global: maxSize=" + globalSizeInfo.maxSize);
+            criteria.maxSize = globalSizeInfo.maxSize;
+        }
+    }
+    
     // Get the original criteria from conversation state
     const stateCriteria = conversationState.currentSearchCriteria || {};
     
@@ -2130,14 +2149,22 @@ if (isConversationalQuery(inputText)) {
             if (conversationalResponse.sizeInfo.size) {
                 initialCriteria.size = conversationalResponse.sizeInfo.size;
                 debugLog(`Adding size criterion: ${conversationalResponse.sizeInfo.size} sqm`);
+                 // SAVE TO GLOBAL VARIABLE
+                globalSizeInfo = { size: conversationalResponse.sizeInfo.size };
             } else {
                 if (conversationalResponse.sizeInfo.minSize) {
                     initialCriteria.minSize = conversationalResponse.sizeInfo.minSize;
                     debugLog(`Adding minSize criterion: ${conversationalResponse.sizeInfo.minSize} sqm`);
+                // SAVE TO GLOBAL VARIABLE
+                    if (!globalSizeInfo) globalSizeInfo = {};
+                    globalSizeInfo.minSize = conversationalResponse.sizeInfo.minSize;
                 }
                 if (conversationalResponse.sizeInfo.maxSize) {
                     initialCriteria.maxSize = conversationalResponse.sizeInfo.maxSize;
                     debugLog(`Adding maxSize criterion: ${conversationalResponse.sizeInfo.maxSize} sqm`);
+                     // SAVE TO GLOBAL VARIABLE
+                    if (!globalSizeInfo) globalSizeInfo = {};
+                    globalSizeInfo.maxSize = conversationalResponse.sizeInfo.maxSize;
                 }
             }
         } else {
@@ -2364,61 +2391,37 @@ if (isConversationalQuery(inputText)) {
     }
 }  
 
-// Replace both existing handleDistrictSelection functions with this single implementation
+// Function to handle district selection from the conversational interface
 function handleDistrictSelection(district, propertyType) {
     debugLog(`DISTRICT SELECTION: District=${district}, Type=${propertyType}`);
-    debugCriteria("Before district selection", originalCriteria);
     
-    // First, make a deep copy of current search criteria using JSON
-    const originalCriteria = conversationState.currentSearchCriteria || {};
-    const criteriaJSON = JSON.stringify(originalCriteria);
-    const currentCriteria = JSON.parse(criteriaJSON);
-    
-    debugLog("DISTRICT SELECTION: Current criteria BEFORE modification:", criteriaJSON);
-    
-    // Extract size information BEFORE adding the user message
-    const hasSizeInfo = !!(currentCriteria.size || currentCriteria.minSize || currentCriteria.maxSize);
-    const sizeInfo = {
-        size: currentCriteria.size,
-        minSize: currentCriteria.minSize,
-        maxSize: currentCriteria.maxSize
-    };
-    
-    // Log the size information specifically
-    if (hasSizeInfo) {
-        debugLog("DISTRICT SELECTION: Size info found:", JSON.stringify(sizeInfo));
-    } else {
-        debugLog("DISTRICT SELECTION: No size info in current criteria");
-    }
+    // Extract size information from globalSizeInfo or current criteria
+    const sizeInfo = globalSizeInfo || {};
+    debugLog("Size info from global:", JSON.stringify(sizeInfo));
     
     // Create a user message showing the selection
-    const selectionMessage = `${propertyType} in ${district}`;
-    addMessage(selectionMessage, 'user');
-    conversationHistory.push({role: "user", content: selectionMessage});
+    const userMessage = `${propertyType} in ${district}`;
+    addMessage(userMessage, 'user');
+    conversationHistory.push({role: "user", content: userMessage});
     
-    // Create a new criteria object with explicitly set properties
+    // Create new criteria with explicitly set properties
     const newCriteria = {
         type: propertyType,
         location: district
     };
     
-    // Explicitly add size information if it exists
+    // IMPORTANT: Add size information DIRECTLY from global variable
     if (sizeInfo.size) {
         newCriteria.size = sizeInfo.size;
-        debugLog(`DISTRICT SELECTION: Preserving size: ${sizeInfo.size} sqm`);
+        debugLog(`Adding size from global: ${sizeInfo.size}`);
     }
     if (sizeInfo.minSize) {
         newCriteria.minSize = sizeInfo.minSize;
-        debugLog(`DISTRICT SELECTION: Preserving minSize: ${sizeInfo.minSize} sqm`);
+        debugLog(`Adding minSize from global: ${sizeInfo.minSize}`);
     }
     if (sizeInfo.maxSize) {
         newCriteria.maxSize = sizeInfo.maxSize;
-        debugLog(`DISTRICT SELECTION: Preserving maxSize: ${sizeInfo.maxSize} sqm`);
-    }
-    
-    // Preserve other potentially useful criteria
-    if (currentCriteria.available) {
-        newCriteria.available = currentCriteria.available;
+        debugLog(`Adding maxSize from global: ${sizeInfo.maxSize}`);
     }
     
     // Reset pagination offset
@@ -2426,10 +2429,6 @@ function handleDistrictSelection(district, propertyType) {
     
     // Update conversation state with the new criteria
     conversationState.currentSearchCriteria = newCriteria;
-    
-    // Log the new criteria
-    debugLog("DISTRICT SELECTION: New search criteria:", JSON.stringify(newCriteria));
-    debugCriteria("After district selection", newCriteria);
     
     // Show typing indicator
     const typingIndicator = document.createElement('div');
@@ -2444,24 +2443,17 @@ function handleDistrictSelection(district, propertyType) {
             document.getElementById('typing-indicator').remove();
         }
         
-        // Use the criteria directly from the state to search
-        const searchCriteria = {...conversationState.currentSearchCriteria};
-        debugLog("DISTRICT SELECTION: Searching with criteria:", JSON.stringify(searchCriteria));
-        debugCriteria("Before search", searchCriteria);
-        
-        // Search for matching properties
-        const matchedProperties = enhancedSearchProperties(searchCriteria);
-        debugLog(`DISTRICT SELECTION: Found ${matchedProperties.length} matching properties`);
-        
-        // Get the language for response
-        const isCzechQuery = isCzech(selectionMessage);
+        // Search for matching properties with the new criteria
+        const matchedProperties = enhancedSearchProperties(newCriteria);
         
         // If we have size criteria but no matches, we should offer to show properties without size constraint
-        if (matchedProperties.length === 0 && hasSizeInfo) {
-            const sizeMessage = sizeInfo.size ? 
-                `around ${sizeInfo.size} sqm` : 
-                `between ${sizeInfo.minSize} and ${sizeInfo.maxSize} sqm`;
+        if (matchedProperties.length === 0 && (newCriteria.size || newCriteria.minSize || newCriteria.maxSize)) {
+            const sizeMessage = newCriteria.size ? 
+                `around ${newCriteria.size} sqm` : 
+                `between ${newCriteria.minSize} and ${newCriteria.maxSize} sqm`;
                 
+            const isCzechQuery = isCzech(userMessage);
+            
             // Create a message saying no properties of that size were found, but offering to show all
             const noSizeMatchMessage = isCzechQuery
                 ? `Bohužel jsem nenašel žádné ${propertyType} prostory o velikosti ${sizeMessage} v oblasti ${district}. Chcete vidět všechny ${propertyType} prostory v této lokalitě?`
@@ -2483,8 +2475,52 @@ function handleDistrictSelection(district, propertyType) {
             return;
         }
         
-        // Display results normally if we have matches
-        displayEnhancedSearchResults(matchedProperties, searchCriteria, null, selectionMessage);
+        // Get the language for response
+        const isCzechQuery = isCzech(userMessage);
+        
+        // Generate response for matched properties
+        if (matchedProperties.length > 0) {
+            // Display the results
+            displayEnhancedSearchResults(matchedProperties, newCriteria, null, userMessage);
+        } else {
+            // No properties found
+            let noMatchResponse = isCzechQuery
+                ? `Bohužel jsem nenašel žádné ${propertyType} prostory v lokalitě ${district}. Chcete zkusit jinou oblast?`
+                : `I couldn't find any ${propertyType} spaces in ${district}. Would you like to try a different area?`;
+            
+            // Add buttons for other recommended districts
+            if (conversationState.currentSearchCriteria && 
+                conversationState.currentSearchCriteria.recommendedDistricts) {
+                
+                const otherDistricts = conversationState.currentSearchCriteria.recommendedDistricts
+                    .filter(d => d !== district);
+                
+                if (otherDistricts.length > 0) {
+                    noMatchResponse += isCzechQuery
+                        ? `<br><br>Zkuste jednu z těchto oblastí:`
+                        : `<br><br>Try one of these areas:`;
+                    
+                    noMatchResponse += `<div class="suggestion-buttons">`;
+                    
+                    for (const otherDistrict of otherDistricts) {
+                        noMatchResponse += `<button class="suggestion-button" onclick="handleDistrictSelection('${otherDistrict}', '${propertyType}')">
+                            ${otherDistrict}
+                        </button>`;
+                    }
+                    
+                    // Also offer "All Prague" option
+                    noMatchResponse += `<button class="suggestion-button" onclick="handleDistrictSelection('Prague', '${propertyType}')">
+                        ${isCzechQuery ? 'Celá Praha' : 'All Prague'}
+                    </button>`;
+                    
+                    noMatchResponse += `</div>`;
+                }
+            }
+            
+            // Display the no-results message
+            addMessage(noMatchResponse, 'bot');
+            conversationHistory.push({role: "assistant", content: noMatchResponse});
+        }
     }, 500);
 }
 
