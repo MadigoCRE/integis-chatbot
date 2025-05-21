@@ -1648,6 +1648,56 @@ IMPORTANT: Return ONLY the JSON. No extra text, no markdown.`;
 async function handleConversationalQueryWithGemini(userQuery) {
     debugLog("Handling conversational query with Gemini:", userQuery);
     
+    // Extract size information before calling Gemini
+    const sizeMatch = userQuery.match(/(\d+)\s*(?:sq\s*m|sqm|square meter|m2|metr)/i);
+    const sizeBetweenMatch = userQuery.match(/between\s+(\d+)\s+and\s+(\d+)/i) || 
+                           userQuery.match(/from\s+(\d+)\s+to\s+(\d+)/i);
+    const minSizeMatch = userQuery.match(/(?:more than|over|larger than|min|minimum|nad|více než|minimálně)\s*(\d+)/i);
+    const maxSizeMatch = userQuery.match(/(?:less than|under|smaller than|max|maximum|do|méně než|pod|maximálně)\s*(\d+)/i);
+    
+    let sizeInfo = null;
+    
+    // Check for size range specifications
+    if (sizeBetweenMatch) {
+        sizeInfo = {
+            minSize: sizeBetweenMatch[1],
+            maxSize: sizeBetweenMatch[2]
+        };
+    } 
+    // Check for individual min/max sizes
+    else if (minSizeMatch && maxSizeMatch) {
+        sizeInfo = {
+            minSize: minSizeMatch[1],
+            maxSize: maxSizeMatch[1]
+        };
+    }
+    // Check for just min size
+    else if (minSizeMatch) {
+        sizeInfo = {
+            minSize: minSizeMatch[1]
+        };
+    }
+    // Check for just max size
+    else if (maxSizeMatch) {
+        sizeInfo = {
+            maxSize: maxSizeMatch[1]
+        };
+    }
+    // Check for approximate size
+    else if (sizeMatch) {
+        sizeInfo = {
+            size: sizeMatch[1]
+        };
+    }
+    
+    // Extract property type information
+    let propertyType = "office"; // Default
+    if (/\b(?:retail|shop|store|obchod)\b/i.test(userQuery)) {
+        propertyType = "retail";
+    } else if (/\b(?:industrial|warehouse|storage|sklad|průmysl)\b/i.test(userQuery)) {
+        propertyType = "industrial";
+    }
+    
     try {
         // Create a prompt that guides Gemini to be a Prague real estate expert
         const conversationalPrompt = `You are a Prague real estate expert working for Integis. Help the client with their location question:
@@ -1736,24 +1786,35 @@ Remember you're an expert on Prague real estate, so provide valuable insights, b
                 // Remove the recommendations tag from the displayed text
                 const cleanedText = generatedText.replace(/\[DISTRICT_RECOMMENDATIONS:[^\]]+\]/, '').trim();
                 
-                // Return both the text and recommendations
+                // Return the complete data with text, recommendations, and size info
                 return {
                     text: cleanedText,
-                    recommendedDistricts: recommendedDistricts
+                    recommendedDistricts: recommendedDistricts,
+                    sizeInfo: sizeInfo,
+                    propertyType: propertyType
                 };
             }
             
             // If no recommendations tag found, return just the text
             return {
                 text: generatedText,
-                recommendedDistricts: []
+                recommendedDistricts: [],
+                sizeInfo: sizeInfo,
+                propertyType: propertyType
             };
         }
         
         throw new Error("No valid response from Gemini");
     } catch (error) {
         debugLog("Error in conversational query handling:", error.message);
-        throw error;
+        
+        // Even in case of error, return the size info that we parsed
+        return {
+            text: "I'm sorry, I couldn't process your location query at the moment. Would you like to search by specific district instead?",
+            recommendedDistricts: ["Prague 1", "Prague 2", "Prague 3", "Prague 7"], // Safe fallback for hipster/trendy areas
+            sizeInfo: sizeInfo,
+            propertyType: propertyType
+        };
     }
 }
      
@@ -1954,68 +2015,94 @@ async function sendMessage() {
     }
 
     // Check if this is a conversational query about locations
-    if (isConversationalQuery(inputText)) {
-        debugLog("Detected conversational query, using Gemini for intelligent response");
+if (isConversationalQuery(inputText)) {
+    debugLog("Detected conversational query, using Gemini for intelligent response");
+    
+    try {
+        // Get a conversational response from Gemini
+        const conversationalResponse = await handleConversationalQueryWithGemini(inputText);
         
-        try {
-            // Get a conversational response from Gemini
-            const conversationalResponse = await handleConversationalQueryWithGemini(inputText);
-            
-            // Extract the type of property they're looking for
-            let propertyType = "office"; // Default to office
+        // Use property type detected by Gemini if available, otherwise extract from input
+        let propertyType = conversationalResponse.propertyType || "office"; // Use detected type or default to office
+        if (!conversationalResponse.propertyType) {
+            // Fallback extraction if Gemini didn't detect property type
             if (/retail|shop|store/i.test(inputText)) {
                 propertyType = "retail";
             } else if (/industrial|warehouse|storage/i.test(inputText)) {
                 propertyType = "industrial";
             }
-            
-            // Remove typing indicator
-            if (document.getElementById('typing-indicator')) {
-                document.getElementById('typing-indicator').remove();
-            }
-            
-            // Generate response HTML
-            let responseHTML = conversationalResponse.text;
-            
-            // Add buttons for recommended districts instead of showing properties directly
-            if (conversationalResponse.recommendedDistricts.length > 0) {
-                const isCzechQuery = isCzech(inputText);
-                
-                // Add a prompt to select a district
-                responseHTML += isCzechQuery 
-                    ? `<br><br>Klikněte na oblast, která vás zajímá, a ukážu vám dostupné ${propertyType} prostory:` 
-                    : `<br><br>Click on an area you're interested in, and I'll show you available ${propertyType} spaces:`;
-                
-                // Add district selection buttons
-                responseHTML += `<div class="suggestion-buttons">`;
-                for (const district of conversationalResponse.recommendedDistricts) {
-                    responseHTML += `<button class="suggestion-button" onclick="handleDistrictSelection('${district}', '${propertyType}')">
-                        ${district}
-                    </button>`;
-                }
-                
-                // Also add an "All Prague" option
-                responseHTML += `<button class="suggestion-button" onclick="handleDistrictSelection('Prague', '${propertyType}')">
-                    ${isCzechQuery ? 'Celá Praha' : 'All Prague'}
-                </button>`;
-                responseHTML += `</div>`;
-                
-                // Store the recommended districts and property type in conversation state for future reference
-                conversationState.currentSearchCriteria = {
-                    type: propertyType,
-                    recommendedDistricts: conversationalResponse.recommendedDistricts
-                };
-            }
-            
-            // Display the response
-            addMessage(responseHTML, 'bot');
-            conversationHistory.push({role: "assistant", content: conversationalResponse.text});
-            return; // Exit early, don't continue with normal search flow
-        } catch (error) {
-            debugLog("Error handling conversational query:", error.message);
-            // Fall through to normal search handling if the AI handling fails
         }
+        
+        // Initialize criteria with property type
+        let initialCriteria = {
+            type: propertyType
+        };
+        
+        // Add size information if available
+        if (conversationalResponse.sizeInfo) {
+            if (conversationalResponse.sizeInfo.size) {
+                initialCriteria.size = conversationalResponse.sizeInfo.size;
+                debugLog(`Adding size criterion: ${conversationalResponse.sizeInfo.size} sqm`);
+            } else {
+                if (conversationalResponse.sizeInfo.minSize) {
+                    initialCriteria.minSize = conversationalResponse.sizeInfo.minSize;
+                    debugLog(`Adding minSize criterion: ${conversationalResponse.sizeInfo.minSize} sqm`);
+                }
+                if (conversationalResponse.sizeInfo.maxSize) {
+                    initialCriteria.maxSize = conversationalResponse.sizeInfo.maxSize;
+                    debugLog(`Adding maxSize criterion: ${conversationalResponse.sizeInfo.maxSize} sqm`);
+                }
+            }
+        }
+        
+        // Remove typing indicator
+        if (document.getElementById('typing-indicator')) {
+            document.getElementById('typing-indicator').remove();
+        }
+        
+        // Store initial criteria in the conversation state
+        conversationState.currentSearchCriteria = initialCriteria;
+        debugLog("Initialized conversation state with criteria:", initialCriteria);
+        
+        // Generate response HTML
+        let responseHTML = conversationalResponse.text;
+        
+        // Add buttons for recommended districts instead of showing properties directly
+        if (conversationalResponse.recommendedDistricts.length > 0) {
+            const isCzechQuery = isCzech(inputText);
+            
+            // Add a prompt to select a district
+            responseHTML += isCzechQuery 
+                ? `<br><br>Klikněte na oblast, která vás zajímá, a ukážu vám dostupné ${propertyType} prostory:` 
+                : `<br><br>Click on an area you're interested in, and I'll show you available ${propertyType} spaces:`;
+            
+            // Add district selection buttons
+            responseHTML += `<div class="suggestion-buttons">`;
+            for (const district of conversationalResponse.recommendedDistricts) {
+                responseHTML += `<button class="suggestion-button" onclick="handleDistrictSelection('${district}', '${propertyType}')">
+                    ${district}
+                </button>`;
+            }
+            
+            // Also add an "All Prague" option
+            responseHTML += `<button class="suggestion-button" onclick="handleDistrictSelection('Prague', '${propertyType}')">
+                ${isCzechQuery ? 'Celá Praha' : 'All Prague'}
+            </button>`;
+            responseHTML += `</div>`;
+            
+            // Store the recommended districts and property type in conversation state for future reference
+            conversationState.currentSearchCriteria.recommendedDistricts = conversationalResponse.recommendedDistricts;
+        }
+        
+        // Display the response
+        addMessage(responseHTML, 'bot');
+        conversationHistory.push({role: "assistant", content: conversationalResponse.text});
+        return; // Exit early, don't continue with normal search flow
+    } catch (error) {
+        debugLog("Error handling conversational query:", error.message);
+        // Fall through to normal search handling if the AI handling fails
     }
+}
 
     // Check if this is a follow-up question
     const isFollowUp = isFollowUpQuestion(inputText);
@@ -2186,15 +2273,25 @@ function handleDistrictSelection(district, propertyType) {
     addMessage(userMessage, 'user');
     conversationHistory.push({role: "user", content: userMessage});
     
-    // Update search criteria
+    // Get current criteria to preserve size information if available
+    const currentCriteria = conversationState.currentSearchCriteria || {};
+    
+    // Create new criteria, preserving size information from the original query
     const criteria = {
         location: district,
         type: propertyType
     };
     
+    // Important: Check and preserve size-related fields from the original query
+    if (currentCriteria.size) criteria.size = currentCriteria.size;
+    if (currentCriteria.minSize) criteria.minSize = currentCriteria.minSize;
+    if (currentCriteria.maxSize) criteria.maxSize = currentCriteria.maxSize;
+    
+    // Reset pagination offset
+    conversationState.offset = 0;
+    
     // Update conversation state
     conversationState.currentSearchCriteria = criteria;
-    conversationState.offset = 0;
     
     // Show typing indicator
     const typingIndicator = document.createElement('div');
@@ -2204,6 +2301,76 @@ function handleDistrictSelection(district, propertyType) {
     document.getElementById('messages').appendChild(typingIndicator);
     
     // Short timeout to show the typing indicator
+    setTimeout(() => {
+        if (document.getElementById('typing-indicator')) {
+            document.getElementById('typing-indicator').remove();
+        }
+        
+        // Search for matching properties
+        const matchedProperties = enhancedSearchProperties(criteria);
+        
+        // If we have size criteria but no matches, we should offer to show properties without size constraint
+        if (matchedProperties.length === 0 && (criteria.size || criteria.minSize || criteria.maxSize)) {
+            const sizeMessage = criteria.size ? 
+                `around ${criteria.size} sqm` : 
+                `between ${criteria.minSize} and ${criteria.maxSize} sqm`;
+                
+            const isCzechQuery = isCzech(userMessage);
+            
+            // Create a message saying no properties of that size were found, but offering to show all
+            const noSizeMatchMessage = isCzechQuery
+                ? `Bohužel jsem nenašel žádné ${propertyType} prostory o velikosti ${sizeMessage} v oblasti ${district}. Chcete vidět všechny ${propertyType} prostory v této lokalitě?`
+                : `I couldn't find any ${propertyType} spaces of ${sizeMessage} in ${district}. Would you like to see all ${propertyType} spaces in this area?`;
+                
+            // Add buttons to show all or adjust size
+            const buttons = `<div class="suggestion-buttons">
+                <button class="suggestion-button" onclick="handleShowAllInLocation('${district}', '${propertyType}')">
+                    ${isCzechQuery ? 'Zobrazit všechny v této lokalitě' : 'Show all in this area'}
+                </button>
+                <button class="suggestion-button" onclick="handleSizeHelpClickFromRefinement()">
+                    ${isCzechQuery ? 'Upravit velikost' : 'Adjust size'}
+                </button>
+            </div>`;
+            
+            // Display the message with buttons
+            addMessage(noSizeMatchMessage + "<br><br>" + buttons, 'bot');
+            return;
+        }
+        
+        // Display the results normally if we have matches
+        displayEnhancedSearchResults(matchedProperties, criteria, null, userMessage);
+    }, 500);
+}
+
+// New helper function to handle showing all properties in a location (clearing size constraints)
+function handleShowAllInLocation(district, propertyType) {
+    // Create a new criteria object with just location and type
+    const criteria = {
+        location: district,
+        type: propertyType
+    };
+    
+    // Update conversation state
+    conversationState.currentSearchCriteria = criteria;
+    conversationState.offset = 0;
+    
+    // Add user message
+    const isCzechQuery = isCzech(document.getElementById('user-input').value);
+    const userMessage = isCzechQuery
+        ? `Všechny ${propertyType} prostory v ${district}`
+        : `All ${propertyType} spaces in ${district}`;
+        
+    addMessage(userMessage, 'user');
+    conversationHistory.push({role: "user", content: userMessage});
+    
+    // Show typing indicator
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing-indicator';
+    typingIndicator.textContent = 'Typing...';
+    typingIndicator.id = 'typing-indicator';
+    document.getElementById('messages').appendChild(typingIndicator);
+    
+    // Short timeout
     setTimeout(() => {
         if (document.getElementById('typing-indicator')) {
             document.getElementById('typing-indicator').remove();
@@ -4246,6 +4413,7 @@ window.displayEnhancedSearchResults = displayEnhancedSearchResults;
 window.handleConversationalQueryWithGemini = handleConversationalQueryWithGemini;
 window.isConversationalQuery = isConversationalQuery;
 window.handleDistrictSelection = handleDistrictSelection;
+window.handleShowAllInLocation = handleShowAllInLocation;
 </script>
 </body>
 </html>  
