@@ -1910,6 +1910,273 @@ ${propertiesText}`;
     }
 }
 
+  // Improved sendMessage function with enhanced feature extraction
+async function sendMessage() {
+    const userInput = document.getElementById('user-input');
+    const inputText = userInput.value.trim();
+    
+    // First check for command - this should be the first thing we do
+    if (inputText.toLowerCase() === "!test api") {
+        userInput.value = '';
+        testGeminiAPI();
+        return;
+    }
+    
+    if (!inputText) return;
+    
+    debugLog("User input:", inputText);
+    
+    // Save to conversation state before clearing
+    conversationState.lastQuery = inputText;
+    
+    // Add user message
+    addMessage(inputText, 'user');
+    
+    // Add to conversation history
+    conversationHistory.push({role: "user", content: inputText});
+    debugLog("Updated conversation history:", conversationHistory.length + " messages");
+    
+    // Clear input
+    userInput.value = '';
+    
+    // Show typing indicator
+    const typingIndicator = document.createElement('div');
+    typingIndicator.className = 'typing-indicator';
+    typingIndicator.textContent = 'Typing...';
+    typingIndicator.id = 'typing-indicator';
+    document.getElementById('messages').appendChild(typingIndicator);
+    document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+    
+    // Ensure properties are loaded
+    if (!propertiesLoaded) {
+        debugLog("Properties not loaded, loading now...");
+        await loadProperties();
+    }
+
+    // Check if this is a conversational query about locations
+    if (isConversationalQuery(inputText)) {
+        debugLog("Detected conversational query, using Gemini for intelligent response");
+        
+        try {
+            // Get a conversational response from Gemini
+            const conversationalResponse = await handleConversationalQueryWithGemini(inputText);
+            
+            // Extract the type of property they're looking for
+            let propertyType = "office"; // Default to office
+            if (/retail|shop|store/i.test(inputText)) {
+                propertyType = "retail";
+            } else if (/industrial|warehouse|storage/i.test(inputText)) {
+                propertyType = "industrial";
+            }
+            
+            // Remove typing indicator
+            if (document.getElementById('typing-indicator')) {
+                document.getElementById('typing-indicator').remove();
+            }
+            
+            // Generate response HTML
+            let responseHTML = conversationalResponse.text;
+            
+            // Add buttons for recommended districts instead of showing properties directly
+            if (conversationalResponse.recommendedDistricts.length > 0) {
+                const isCzechQuery = isCzech(inputText);
+                
+                // Add a prompt to select a district
+                responseHTML += isCzechQuery 
+                    ? `<br><br>Klikněte na oblast, která vás zajímá, a ukážu vám dostupné ${propertyType} prostory:` 
+                    : `<br><br>Click on an area you're interested in, and I'll show you available ${propertyType} spaces:`;
+                
+                // Add district selection buttons
+                responseHTML += `<div class="suggestion-buttons">`;
+                for (const district of conversationalResponse.recommendedDistricts) {
+                    responseHTML += `<button class="suggestion-button" onclick="handleDistrictSelection('${district}', '${propertyType}')">
+                        ${district}
+                    </button>`;
+                }
+                
+                // Also add an "All Prague" option
+                responseHTML += `<button class="suggestion-button" onclick="handleDistrictSelection('Prague', '${propertyType}')">
+                    ${isCzechQuery ? 'Celá Praha' : 'All Prague'}
+                </button>`;
+                responseHTML += `</div>`;
+                
+                // Store the recommended districts and property type in conversation state for future reference
+                conversationState.currentSearchCriteria = {
+                    type: propertyType,
+                    recommendedDistricts: conversationalResponse.recommendedDistricts
+                };
+            }
+            
+            // Display the response
+            addMessage(responseHTML, 'bot');
+            conversationHistory.push({role: "assistant", content: conversationalResponse.text});
+            return; // Exit early, don't continue with normal search flow
+        } catch (error) {
+            debugLog("Error handling conversational query:", error.message);
+            // Fall through to normal search handling if the AI handling fails
+        }
+    }
+
+    // Check if this is a follow-up question
+    const isFollowUp = isFollowUpQuestion(inputText);
+    debugLog("Is follow-up question:", isFollowUp);
+    
+    // Create search criteria with enhanced extraction
+    let criteria = {};
+    
+    // If follow-up, start with previous criteria
+    if (isFollowUp && conversationState.currentSearchCriteria) {
+        criteria = {...conversationState.currentSearchCriteria};
+        debugLog("Using previous search criteria as base:", criteria);
+        
+        // For pagination requests, keep the same criteria but update offset
+        if (/more|další|show more|ukázat více/i.test(inputText)) {
+            conversationState.offset += 5; // Show next 5 results
+            debugLog("Pagination request - updating offset to:", conversationState.offset);
+        }
+    } else {
+        // Reset offset for new searches
+        conversationState.offset = 0;
+    }
+    
+    // Use enhanced extraction for new criteria
+    const newCriteria = await enhancedExtractSearchCriteria(inputText, isFollowUp ? criteria : null);
+    
+    // Merge with existing criteria, with new values taking precedence
+    criteria = {...criteria, ...newCriteria};
+    
+    // For requests to "show all" - start fresh with just the core criteria
+    if (/show all|share all|all properties|all units|všechny|všechny jednotky/i.test(inputText)) {
+        // Keep only the most important criteria (type, location, size) and reset pagination
+        const coreCriteria = {};
+        if (criteria.type) coreCriteria.type = criteria.type;
+        if (criteria.location) coreCriteria.location = criteria.location;
+        if (criteria.size) coreCriteria.size = criteria.size;
+        if (criteria.maxSize) coreCriteria.maxSize = criteria.maxSize;
+        if (criteria.minSize) coreCriteria.minSize = criteria.minSize;
+        
+        criteria = coreCriteria;
+        conversationState.offset = 0;
+        debugLog("'Show all' request - using core criteria only:", criteria);
+    }
+    
+    // IMPORTANT: Update the global conversation state with the new criteria
+    conversationState.currentSearchCriteria = {...criteria};
+    debugLog("Updated conversation state with new criteria:", conversationState.currentSearchCriteria);
+    
+    // Extract the implied features for explanation if present
+    const impliedFeatures = criteria.impliedFeatures;
+    // Remove from search criteria to avoid interfering with property matching
+    delete criteria.impliedFeatures;
+    
+    // If this is a people-based query, use Gemini to convert people to sqm
+    if (criteria.peopleCount) {
+        try {
+            debugLog("People-based query detected, using Gemini to convert to sqm");
+            
+            // Call Gemini API to convert people to sqm
+            const conversionResponse = await callGeminiAPIForPeopleConversion(criteria.peopleCount, criteria.type || "office");
+            
+            // Update criteria with the sqm conversion
+            if (conversionResponse.minSize && conversionResponse.maxSize) {
+                debugLog(`Converted ${criteria.peopleCount} people to ${conversionResponse.minSize}-${conversionResponse.maxSize} sqm`);
+                
+                // Update criteria with the size range
+                delete criteria.size; // Remove any size if present
+                criteria.minSize = conversionResponse.minSize;
+                criteria.maxSize = conversionResponse.maxSize;
+                
+                // Remove the peopleCount flag
+                delete criteria.peopleCount;
+                
+                // Update conversation state
+                conversationState.currentSearchCriteria = {...criteria};
+                
+                // Search with the updated criteria
+                const matchedProperties = enhancedSearchProperties(criteria);
+                
+                if (matchedProperties.length > 0) {
+                    // Use the enhanced display function for consistency
+                    displayEnhancedSearchResults(matchedProperties, criteria, impliedFeatures, inputText);
+                    return;
+                } else {
+                    // No matching properties found
+                    const noMatchResponse = isCzech(inputText)
+                        ? `Pro ${criteria.peopleCount} osob byste potřebovali přibližně ${criteria.minSize}-${criteria.maxSize} m². ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Bohužel jsem nenašel žádné nemovitosti, které přesně odpovídají těmto parametrům. Zkuste prosím upravit kritéria vyhledávání nebo se podívat na alternativy.`
+                        : `For ${criteria.peopleCount} people, you would need approximately ${criteria.minSize}-${criteria.maxSize} sqm. ${conversionResponse.explanation}<br><br>${conversionResponse.considerations}<br><br>Unfortunately, I couldn't find any properties that exactly match these parameters. Please try adjusting your search criteria or looking at alternatives.`;
+                    
+                    if (document.getElementById('typing-indicator')) {
+                        document.getElementById('typing-indicator').remove();
+                    }
+                    
+                    addMessage(noMatchResponse, 'bot');
+                    conversationHistory.push({role: "assistant", content: noMatchResponse});
+                    return;
+                }
+            }
+        } catch (error) {
+            debugLog("Error processing people-based query:", error.message);
+            // Continue with normal flow if there's an error
+        }
+    }
+
+    // Search for properties using the enhanced criteria
+    const matchedProperties = enhancedSearchProperties(criteria);
+    
+    // Store the properties we've shown for follow-up questions
+    if (matchedProperties.length > 0) {
+        const propertiesToShow = matchedProperties.slice(
+            conversationState.offset, 
+            conversationState.offset + 5
+        );
+        
+        // Update last shown properties
+        conversationState.lastShownProperties = propertiesToShow.map(p => p.name);
+        debugLog("Updated last shown properties:", conversationState.lastShownProperties);
+        
+        // Use the enhanced display function
+        displayEnhancedSearchResults(matchedProperties, criteria, impliedFeatures, inputText);
+        return;
+    }
+    
+    // If we didn't find any properties with the enhanced criteria, try Gemini API for a more conversational response
+    try {
+        debugLog("No matches found with enhanced criteria, using Gemini API for conversational response");
+        // Try to call Gemini API with timeout
+        const apiPromise = callGeminiAPI(inputText);
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => {
+                debugLog("API call timed out after 20 seconds");
+                reject(new Error("API call timed out"))
+            }, 20000)
+        );
+        
+        const aiResponse = await Promise.race([apiPromise, timeoutPromise]);
+        debugLog("Received API response");
+        
+        if (document.getElementById('typing-indicator')) {
+            document.getElementById('typing-indicator').remove();
+        }
+        
+        // Save this response to conversation state
+        conversationState.lastResponse = aiResponse;
+        
+        addMessage(aiResponse, 'bot');
+        
+        // Add to conversation history
+        conversationHistory.push({role: "assistant", content: aiResponse});
+    } catch (error) {
+        // If Gemini API fails, show a simple "no properties found" message using the enhanced display
+        debugLog("Error calling AI, displaying simple no matches response:", error.message);
+        if (document.getElementById('typing-indicator')) {
+            document.getElementById('typing-indicator').remove();
+        }
+        
+        // Display no results with enhanced features explanation
+        displayEnhancedSearchResults([], criteria, impliedFeatures, inputText);
+    }
+}  
+
 // Function to handle district selection from the conversational interface
 function handleDistrictSelection(district, propertyType) {
     debugLog(`District selected: ${district}, Property type: ${propertyType}`);
